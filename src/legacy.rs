@@ -19,10 +19,6 @@ use crate::{encoding, idna};
 // Code-point classification + percent-encode sets
 // ---------------------------------------------------------------------------------------------
 
-fn is_ascii_hex(c: char) -> bool {
-    c.is_ascii_hexdigit()
-}
-
 /// The C0 control percent-encode set: C0 controls (<= U+001F) and every code point > U+007E.
 fn in_c0_control_set(c: char) -> bool {
     c <= '\u{1f}' || c > '\u{7e}'
@@ -295,15 +291,15 @@ fn parse_ipv4(input: &str) -> Result<u32, ()> {
     Ok(ipv4 as u32)
 }
 
-fn parse_ipv6(input: &str) -> Result<[u16; 8], ()> {
+pub(super) fn parse_ipv6(input: &str) -> Result<[u16; 8], ()> {
     let mut address = [0u16; 8];
     let mut piece_index = 0usize;
     let mut compress: Option<usize> = None;
-    let chars: Vec<char> = input.chars().collect();
+    let bytes = input.as_bytes();
     let mut p = 0usize;
-    let len = chars.len();
-    if p < len && chars[p] == ':' {
-        if p + 1 >= len || chars[p + 1] != ':' {
+    let len = bytes.len();
+    if p < len && bytes[p] == b':' {
+        if p + 1 >= len || bytes[p + 1] != b':' {
             return Err(());
         }
         p += 2;
@@ -314,7 +310,7 @@ fn parse_ipv6(input: &str) -> Result<[u16; 8], ()> {
         if piece_index == 8 {
             return Err(());
         }
-        if chars[p] == ':' {
+        if bytes[p] == b':' {
             if compress.is_some() {
                 return Err(());
             }
@@ -325,12 +321,18 @@ fn parse_ipv6(input: &str) -> Result<[u16; 8], ()> {
         }
         let mut value: u16 = 0;
         let mut length = 0;
-        while length < 4 && p < len && is_ascii_hex(chars[p]) {
-            value = value * 16 + chars[p].to_digit(16).unwrap() as u16;
+        while length < 4 && p < len {
+            let digit = match bytes[p] {
+                b'0'..=b'9' => bytes[p] - b'0',
+                b'a'..=b'f' => bytes[p] - b'a' + 10,
+                b'A'..=b'F' => bytes[p] - b'A' + 10,
+                _ => break,
+            };
+            value = value * 16 + u16::from(digit);
             p += 1;
             length += 1;
         }
-        if p < len && chars[p] == '.' {
+        if p < len && bytes[p] == b'.' {
             if length == 0 {
                 return Err(());
             }
@@ -342,17 +344,17 @@ fn parse_ipv6(input: &str) -> Result<[u16; 8], ()> {
             while p < len {
                 let mut ipv4_piece: Option<u16> = None;
                 if numbers_seen > 0 {
-                    if chars[p] == '.' && numbers_seen < 4 {
+                    if bytes[p] == b'.' && numbers_seen < 4 {
                         p += 1;
                     } else {
                         return Err(());
                     }
                 }
-                if p >= len || !chars[p].is_ascii_digit() {
+                if p >= len || !bytes[p].is_ascii_digit() {
                     return Err(());
                 }
-                while p < len && chars[p].is_ascii_digit() {
-                    let number = chars[p].to_digit(10).unwrap() as u16;
+                while p < len && bytes[p].is_ascii_digit() {
+                    let number = u16::from(bytes[p] - b'0');
                     match ipv4_piece {
                         None => ipv4_piece = Some(number),
                         Some(0) => return Err(()),
@@ -373,7 +375,7 @@ fn parse_ipv6(input: &str) -> Result<[u16; 8], ()> {
                 return Err(());
             }
             break;
-        } else if p < len && chars[p] == ':' {
+        } else if p < len && bytes[p] == b':' {
             p += 1;
             if p >= len {
                 return Err(());

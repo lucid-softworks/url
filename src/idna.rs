@@ -429,12 +429,15 @@ pub(crate) fn push_simple_domain_to_ascii(output: &mut String, domain: &str) -> 
         return false;
     }
 
-    for (index, label) in domain.split('.').enumerate() {
-        if index > 0 {
+    let mut labels = domain.split('.').peekable();
+    let mut first = true;
+    while let Some(label) = labels.next() {
+        if !first {
             output.push('.');
         }
+        first = false;
         if label.is_empty() {
-            if index + 1 == domain.split('.').count() {
+            if labels.peek().is_none() {
                 continue;
             }
             output.truncate(original_length);
@@ -473,9 +476,9 @@ pub(crate) fn push_simple_domain_to_ascii(output: &mut String, domain: &str) -> 
                 return false;
             }
         } else {
-            for byte in label.bytes() {
-                output.push(char::from(byte.to_ascii_lowercase()));
-            }
+            let start = output.len();
+            output.push_str(label);
+            output[start..].make_ascii_lowercase();
         }
     }
     true

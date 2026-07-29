@@ -19,6 +19,10 @@ const TOP_SITES: &[&str] = &[
 ];
 
 fn sample(urls: &[&str], operation: &mut impl FnMut(&str) -> usize) -> (f64, usize) {
+    let minimum_duration = std::env::var("LUCID_URL_BENCH_SAMPLE_MS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .map_or(Duration::from_millis(300), Duration::from_millis);
     let mut iterations = 1usize;
     loop {
         let start = Instant::now();
@@ -29,7 +33,7 @@ fn sample(urls: &[&str], operation: &mut impl FnMut(&str) -> usize) -> (f64, usi
             }
         }
         let elapsed = start.elapsed();
-        if elapsed >= Duration::from_millis(300) {
+        if elapsed >= minimum_duration {
             let count = iterations * urls.len();
             return (elapsed.as_nanos() as f64 / count as f64, checksum);
         }
@@ -51,25 +55,41 @@ fn measure(urls: &[&str], mut operation: impl FnMut(&str) -> usize) -> (f64, f64
 }
 
 fn run(name: &str, urls: &[&str]) {
-    let (aggregate_ns, aggregate_rate, aggregate_sum) = measure(urls, |input| {
-        parse::<UrlAggregator>(input, None).map_or(0, |url| url.get_href_size())
-    });
-    let (url_ns, url_rate, url_sum) = measure(urls, |input| {
-        parse::<Url>(input, None).map_or(0, |url| url.get_href_size())
-    });
-    let (can_parse_ns, can_parse_rate, can_parse_sum) =
-        measure(urls, |input| usize::from(can_parse(input, None)));
-
-    black_box((aggregate_sum, url_sum, can_parse_sum));
     println!("\n{name} ({} URLs)", urls.len());
     println!("implementation             ns/url        URLs/s");
-    println!("lucid UrlAggregator    {aggregate_ns:10.2}  {aggregate_rate:12.0}");
-    println!("lucid Url              {url_ns:10.2}  {url_rate:12.0}");
-    println!("lucid can_parse        {can_parse_ns:10.2}  {can_parse_rate:12.0}");
+    let operation = std::env::var("LUCID_URL_BENCH_ONLY").ok();
+    if operation
+        .as_deref()
+        .is_none_or(|value| value == "aggregate")
+    {
+        let (nanoseconds, rate, checksum) = measure(urls, |input| {
+            parse::<UrlAggregator>(input, None).map_or(0, |url| url.get_href_size())
+        });
+        black_box(checksum);
+        println!("lucid UrlAggregator    {nanoseconds:10.2}  {rate:12.0}");
+    }
+    if operation.as_deref().is_none_or(|value| value == "url") {
+        let (nanoseconds, rate, checksum) = measure(urls, |input| {
+            parse::<Url>(input, None).map_or(0, |url| url.get_href_size())
+        });
+        black_box(checksum);
+        println!("lucid Url              {nanoseconds:10.2}  {rate:12.0}");
+    }
+    if operation
+        .as_deref()
+        .is_none_or(|value| value == "can_parse")
+    {
+        let (nanoseconds, rate, checksum) =
+            measure(urls, |input| usize::from(can_parse(input, None)));
+        black_box(checksum);
+        println!("lucid can_parse        {nanoseconds:10.2}  {rate:12.0}");
+    }
 }
 
 fn main() {
-    run("top sites", TOP_SITES);
+    if std::env::var_os("LUCID_URL_BENCH_SKIP_TOP_SITES").is_none() {
+        run("top sites", TOP_SITES);
+    }
 
     let dataset_path = std::env::args()
         .skip(1)

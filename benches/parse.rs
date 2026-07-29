@@ -26,6 +26,10 @@ const NORMALIZATION_HEAVY: &[&str] = &[
 ];
 
 fn sample(urls: &[&str], operation: &mut impl FnMut(&str) -> usize) -> (f64, usize) {
+    let minimum_duration = std::env::var("LUCID_URL_BENCH_SAMPLE_MS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .map_or(Duration::from_millis(300), Duration::from_millis);
     let mut iterations = 1usize;
     loop {
         let start = Instant::now();
@@ -37,7 +41,7 @@ fn sample(urls: &[&str], operation: &mut impl FnMut(&str) -> usize) -> (f64, usi
                 .sum::<usize>();
         }
         let elapsed = start.elapsed();
-        if elapsed >= Duration::from_millis(300) {
+        if elapsed >= minimum_duration {
             let count = iterations * urls.len();
             return (elapsed.as_nanos() as f64 / count as f64, checksum);
         }
@@ -74,6 +78,27 @@ fn run(name: &str, urls: &[&str]) {
 }
 
 fn main() {
+    if let Some(index) = std::env::var("LUCID_URL_BENCH_CANONICAL_INDEX")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+    {
+        let input = CANONICAL[index];
+        run(input, std::slice::from_ref(&input));
+        return;
+    }
+    if let Some(index) = std::env::var("LUCID_URL_BENCH_INDEX")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+    {
+        let input = NORMALIZATION_HEAVY[index];
+        run(input, std::slice::from_ref(&input));
+        return;
+    }
     run("canonical ASCII", CANONICAL);
     run("normalization-heavy", NORMALIZATION_HEAVY);
+    if std::env::var_os("LUCID_URL_BENCH_INDIVIDUAL").is_some() {
+        for input in NORMALIZATION_HEAVY {
+            run(input, std::slice::from_ref(input));
+        }
+    }
 }

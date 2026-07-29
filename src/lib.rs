@@ -8,8 +8,6 @@
 //!   getters allocation-free.
 
 use std::fmt;
-use std::net::Ipv6Addr;
-use std::str::FromStr;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 mod encoding;
@@ -74,6 +72,8 @@ const BYTE_PATH: u8 = 1 << 1;
 const BYTE_SPECIAL_QUERY: u8 = 1 << 2;
 const BYTE_FRAGMENT: u8 = 1 << 3;
 const BYTE_QUERY: u8 = 1 << 4;
+const BYTE_PATH_CONTINUE: u8 = 1 << 5;
+const BYTE_USERINFO: u8 = 1 << 6;
 const BYTE_CLASSES: [u8; 256] = {
     let mut classes = [0u8; 256];
     let mut value = 0usize;
@@ -110,6 +110,9 @@ const BYTE_CLASSES: [u8; 256] = {
             )
         {
             classes[value] |= BYTE_PATH;
+            if byte != b'/' {
+                classes[value] |= BYTE_PATH_CONTINUE;
+            }
         }
         if byte >= 0x20 && byte <= 0x7e && !matches!(byte, b' ' | b'"' | b'#' | b'<' | b'>' | b'\'')
         {
@@ -120,6 +123,32 @@ const BYTE_CLASSES: [u8; 256] = {
         }
         if byte >= 0x20 && byte <= 0x7e && !matches!(byte, b' ' | b'"' | b'#' | b'<' | b'>') {
             classes[value] |= BYTE_QUERY;
+        }
+        if byte >= 0x20
+            && byte <= 0x7e
+            && !matches!(
+                byte,
+                b' ' | b'"'
+                    | b'#'
+                    | b'/'
+                    | b':'
+                    | b';'
+                    | b'<'
+                    | b'='
+                    | b'>'
+                    | b'?'
+                    | b'@'
+                    | b'['
+                    | b'\\'
+                    | b']'
+                    | b'^'
+                    | b'`'
+                    | b'{'
+                    | b'|'
+                    | b'}'
+            )
+        {
+            classes[value] |= BYTE_USERINFO;
         }
         value += 1;
     }
@@ -167,7 +196,9 @@ pub fn can_parse(input: &str, base: Option<&str>) -> bool {
         if let Some(result) = try_can_parse_clean_http(input) {
             return result;
         }
-        if let Some(result) = UrlAggregator::try_fast_clean_http_components(input) {
+        if let Some(FastHttpScan::Parsed(result)) =
+            UrlAggregator::try_fast_clean_http_components(input)
+        {
             return result.is_ok();
         }
         if let Some(result) = try_can_parse_clean_non_special(input) {
@@ -205,7 +236,7 @@ fn try_can_parse_clean_http(input: &str) -> Option<bool> {
             .iter()
             .position(|&byte| byte == b']')
             .map(|offset| authority_start + 1 + offset)?;
-        if Ipv6Addr::from_str(&input[authority_start + 1..closing]).is_err() {
+        if legacy::parse_ipv6(&input[authority_start + 1..closing]).is_err() {
             return Some(false);
         }
         let mut cursor = closing + 1;
@@ -237,63 +268,63 @@ fn try_can_parse_clean_http(input: &str) -> Option<bool> {
     }
 
     let mut cursor = authority_start;
-    let mut host_end = usize::MAX;
-    let mut port_digits = 0usize;
-    let mut port_value = 0u32;
-    let mut last_label_start = authority_start;
-    let mut numeric_host = true;
+    while cursor + 4 <= bytes.len() && four_bytes_have_class(bytes, cursor, BYTE_HOST) {
+        cursor += 4;
+    }
     while cursor < bytes.len() {
         let byte = bytes[cursor];
         if matches!(byte, b'/' | b'?' | b'#') {
             break;
         }
-        if host_end != usize::MAX {
-            if !byte.is_ascii_digit() {
-                return None;
-            }
-            port_digits += 1;
-            port_value = port_value
-                .checked_mul(10)
-                .and_then(|value| value.checked_add(u32::from(byte - b'0')))
-                .unwrap_or(u32::MAX);
-            if port_value > u32::from(u16::MAX) {
-                return Some(false);
-            }
-        } else if byte == b':' {
-            if cursor == authority_start {
-                return None;
-            }
-            host_end = cursor;
-        } else {
-            if !host_byte_is_canonical(byte) {
-                return None;
-            }
-            if byte == b'.' {
-                last_label_start = cursor + 1;
-            } else if !byte.is_ascii_digit() {
-                numeric_host = false;
-            }
+        if byte == b':' {
+            break;
+        }
+        if !host_byte_is_canonical(byte) {
+            return None;
         }
         cursor += 1;
     }
 
-    let host_end = if host_end == usize::MAX {
-        cursor
-    } else {
-        if port_digits == 0 {
+    let host_end = cursor;
+    if bytes.get(cursor) == Some(&b':') {
+        cursor += 1;
+        let port_start = cursor;
+        let mut port = 0u32;
+        while cursor < bytes.len() && !matches!(bytes[cursor], b'/' | b'?' | b'#') {
+            let byte = bytes[cursor];
+            if !byte.is_ascii_digit() {
+                return None;
+            }
+            port = port
+                .checked_mul(10)
+                .and_then(|value| value.checked_add(u32::from(byte - b'0')))
+                .unwrap_or(u32::MAX);
+            if port > u32::from(u16::MAX) {
+                return Some(false);
+            }
+            cursor += 1;
+        }
+        if cursor == port_start {
             return None;
         }
-        host_end
-    };
+    }
     if host_end == authority_start {
         return Some(false);
     }
-    if bytes.get(host_end.wrapping_sub(1)) == Some(&b'.') {
+    let last = bytes[host_end - 1];
+    if last == b'.' {
         return None;
     }
-    if bytes.get(last_label_start).is_some_and(u8::is_ascii_digit)
-        && (!numeric_host || !canonical_ipv4(&input[authority_start..host_end]))
-    {
+    let hostname = &input[authority_start..host_end];
+    if last.is_ascii_digit() {
+        if !hostname
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || byte == b'.')
+            || !canonical_ipv4(hostname)
+        {
+            return None;
+        }
+    } else if last == b'x' && (hostname == "0x" || hostname.ends_with(".0x")) {
         return None;
     }
     Some(true)
@@ -413,6 +444,16 @@ impl ParseTarget for UrlAggregator {
             if let Some(parsed) = Self::try_fast_clean_http_absolute(input) {
                 return parsed;
             }
+            if matches!(
+                input.as_bytes(),
+                [b'f', b't', b'p', b':', b'/', b'/', ..]
+                    | [b'w', b's', b':', b'/', b'/', ..]
+                    | [b'w', b's', b's', b':', b'/', b'/', ..]
+            ) {
+                if let Some(parsed) = Self::try_fast_absolute(input) {
+                    return parsed;
+                }
+            }
             if let Some(hint) = normalization_hint(input) {
                 let parsed = match hint {
                     NormalizationHint::Special {
@@ -467,6 +508,10 @@ impl UrlAggregator {
     #[inline(always)]
     fn try_fast_clean_http_absolute(input: &str) -> Option<Result<Self>> {
         let components = match Self::try_fast_clean_http_components(input)? {
+            FastHttpScan::ComplexAuthority => return Self::try_fast_absolute(input),
+            FastHttpScan::Parsed(components) => components,
+        };
+        let components = match components {
             Ok(components) => components,
             Err(error) => return Some(Err(error)),
         };
@@ -648,7 +693,7 @@ impl UrlAggregator {
         }))
     }
 
-    fn try_fast_clean_http_components(input: &str) -> Option<Result<FastHttpComponents>> {
+    fn try_fast_clean_http_components(input: &str) -> Option<FastHttpScan> {
         let bytes = input.as_bytes();
         let protocol_end = if bytes.starts_with(b"https://") {
             5usize
@@ -659,16 +704,22 @@ impl UrlAggregator {
         };
         let authority_start = protocol_end + 3;
         if authority_start >= bytes.len() {
-            return Some(Err(Error::TypeError));
+            return Some(FastHttpScan::Parsed(Err(Error::TypeError)));
         }
 
         let mut cursor = authority_start;
+        while cursor + 8 <= bytes.len() && eight_bytes_have_class(bytes, cursor, BYTE_HOST) {
+            cursor += 8;
+        }
         while cursor < bytes.len() {
             let byte = bytes[cursor];
             if matches!(byte, b'/' | b'?' | b'#') {
                 break;
             }
             if !host_byte_is_canonical(byte) {
+                if matches!(byte, b':' | b'@') {
+                    return Some(FastHttpScan::ComplexAuthority);
+                }
                 return None;
             }
             cursor += 1;
@@ -676,16 +727,16 @@ impl UrlAggregator {
 
         let host_end = cursor;
         if host_end == authority_start {
-            return Some(Err(Error::TypeError));
+            return Some(FastHttpScan::Parsed(Err(Error::TypeError)));
         }
-        if bytes.get(host_end.wrapping_sub(1)) == Some(&b'.') {
+        let last = bytes[host_end - 1];
+        if last == b'.' {
             return None;
         }
 
         let hostname = &bytes[authority_start..host_end];
-        let last = hostname.last().copied();
-        if last.is_some_and(|byte| byte.is_ascii_digit())
-            || (last == Some(b'x') && (hostname == b"0x" || hostname.ends_with(b".0x")))
+        if last.is_ascii_digit()
+            || (last == b'x' && (hostname == b"0x" || hostname.ends_with(b".0x")))
         {
             return None;
         }
@@ -697,6 +748,12 @@ impl UrlAggregator {
             let mut segment_start = cursor + 1;
             cursor += 1;
             while cursor < bytes.len() && !matches!(bytes[cursor], b'?' | b'#') {
+                if cursor + 4 <= bytes.len()
+                    && four_bytes_have_class(bytes, cursor, BYTE_PATH_CONTINUE)
+                {
+                    cursor += 4;
+                    continue;
+                }
                 let byte = bytes[cursor];
                 if !path_byte_is_canonical(byte) {
                     return None;
@@ -717,6 +774,12 @@ impl UrlAggregator {
             search_start = cursor as u32;
             cursor += 1;
             while cursor < bytes.len() && bytes[cursor] != b'#' {
+                if cursor + 8 <= bytes.len()
+                    && eight_bytes_have_class(bytes, cursor, BYTE_SPECIAL_QUERY)
+                {
+                    cursor += 8;
+                    continue;
+                }
                 if !special_query_byte_is_canonical(bytes[cursor]) {
                     return None;
                 }
@@ -727,6 +790,11 @@ impl UrlAggregator {
             hash_start = cursor as u32;
             cursor += 1;
             while cursor < bytes.len() {
+                if cursor + 8 <= bytes.len() && eight_bytes_have_class(bytes, cursor, BYTE_FRAGMENT)
+                {
+                    cursor += 8;
+                    continue;
+                }
                 if !fragment_byte_is_canonical(bytes[cursor]) {
                     return None;
                 }
@@ -737,14 +805,14 @@ impl UrlAggregator {
             return None;
         }
 
-        Some(Ok(FastHttpComponents {
+        Some(FastHttpScan::Parsed(Ok(FastHttpComponents {
             protocol_end,
             authority_start,
             host_end,
             pathname_start,
             search_start,
             hash_start,
-        }))
+        })))
     }
 
     fn from_record(record: &legacy::Url) -> Result<Self> {
@@ -1056,16 +1124,12 @@ impl UrlAggregator {
                     (username, Some(password))
                 });
             if !username.is_empty() || password.is_some_and(|password| !password.is_empty()) {
-                for character in username.chars() {
-                    push_encoded(&mut buffer, character, EncodeSet::UserInfo);
-                }
+                push_encoded_runs(&mut buffer, username, EncodeSet::UserInfo, BYTE_USERINFO);
                 username_end = buffer.len();
                 if let Some(password) = password.filter(|password| !password.is_empty()) {
                     password_present = true;
                     buffer.push(':');
-                    for character in password.chars() {
-                        push_encoded(&mut buffer, character, EncodeSet::UserInfo);
-                    }
+                    push_encoded_runs(&mut buffer, password, EncodeSet::UserInfo, BYTE_USERINFO);
                 }
                 buffer.push('@');
             }
@@ -1109,17 +1173,18 @@ impl UrlAggregator {
         if let Some(query) = query {
             search_start = buffer.len() as u32;
             buffer.push('?');
-            for character in query.chars() {
-                push_encoded(&mut buffer, character, EncodeSet::SpecialQuery);
-            }
+            push_encoded_runs(
+                &mut buffer,
+                query,
+                EncodeSet::SpecialQuery,
+                BYTE_SPECIAL_QUERY,
+            );
         }
         let mut hash_start = UrlComponents::OMITTED;
         if let Some(fragment) = fragment {
             hash_start = buffer.len() as u32;
             buffer.push('#');
-            for character in fragment.chars() {
-                push_encoded(&mut buffer, character, EncodeSet::Fragment);
-            }
+            push_encoded_runs(&mut buffer, fragment, EncodeSet::Fragment, BYTE_FRAGMENT);
         }
 
         if buffer.len() > get_max_input_length() as usize || buffer.len() > u32::MAX as usize {
@@ -1826,6 +1891,11 @@ struct FastHttpComponents {
     hash_start: u32,
 }
 
+enum FastHttpScan {
+    Parsed(Result<FastHttpComponents>),
+    ComplexAuthority,
+}
+
 impl SpecialScheme {
     #[inline]
     fn from_input(input: &str) -> Option<Self> {
@@ -1949,6 +2019,33 @@ fn push_encoded(output: &mut String, character: char, set: EncodeSet) {
     }
 }
 
+fn push_encoded_runs(output: &mut String, input: &str, set: EncodeSet, class: u8) {
+    if !input.is_ascii() {
+        for character in input.chars() {
+            push_encoded(output, character, set);
+        }
+        return;
+    }
+
+    let mut run_start = 0usize;
+    for (index, byte) in input.bytes().enumerate() {
+        let skipped = matches!(byte, b'\t' | b'\n' | b'\r');
+        if !skipped && BYTE_CLASSES[byte as usize] & class != 0 {
+            continue;
+        }
+        if run_start < index {
+            output.push_str(&input[run_start..index]);
+        }
+        if !skipped {
+            push_encoded(output, char::from(byte), set);
+        }
+        run_start = index + 1;
+    }
+    if run_start < input.len() {
+        output.push_str(&input[run_start..]);
+    }
+}
+
 #[inline]
 fn split_host_port(input: &str) -> Result<(&str, Option<&str>)> {
     if input.starts_with('[') {
@@ -1976,36 +2073,41 @@ fn split_host_port(input: &str) -> Result<(&str, Option<&str>)> {
 
 #[inline]
 fn push_normalized_special_host(output: &mut String, input: &str) -> Result<UrlHostType> {
-    if let Some(address) = input
+    if let Some(segments) = input
         .strip_prefix('[')
         .and_then(|input| input.strip_suffix(']'))
-        .and_then(|input| Ipv6Addr::from_str(input).ok())
+        .and_then(|input| legacy::parse_ipv6(input).ok())
     {
-        push_ipv6_address(output, address);
+        push_ipv6_address(output, &segments);
         return Ok(UrlHostType::Ipv6);
     }
 
-    let last_label = input.trim_end_matches('.').rsplit('.').next().unwrap_or("");
-    let ends_in_number = last_label
+    let numeric_candidate = input.trim_end_matches('.');
+    let ends_in_number = numeric_candidate
         .as_bytes()
-        .first()
-        .is_some_and(u8::is_ascii_digit);
-    let simple_ascii = input.is_ascii()
-        && !input.starts_with('[')
-        && !input.contains('%')
+        .last()
+        .is_some_and(|byte| byte.is_ascii_digit() || matches!(byte, b'x' | b'X'))
+        && numeric_candidate
+            .rsplit('.')
+            .next()
+            .and_then(|label| label.as_bytes().first())
+            .is_some_and(u8::is_ascii_digit);
+    let contains_percent = input.contains('%');
+    let simple_ascii = !input.starts_with('[')
+        && !contains_percent
         && !ends_in_number
         && input
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'));
 
     if simple_ascii {
-        for byte in input.bytes() {
-            output.push(char::from(byte.to_ascii_lowercase()));
-        }
+        let start = output.len();
+        output.push_str(input);
+        output[start..].make_ascii_lowercase();
         return Ok(UrlHostType::Default);
     }
 
-    if ends_in_number && input.is_ascii() && !input.contains('%') {
+    if ends_in_number && input.is_ascii() && !contains_percent {
         if let Some(address) = parse_ipv4_address(input) {
             push_decimal_u8(output, (address >> 24) as u8);
             output.push('.');
@@ -2019,14 +2121,14 @@ fn push_normalized_special_host(output: &mut String, input: &str) -> Result<UrlH
     }
 
     if !input.is_ascii()
-        && !input.contains('%')
+        && !contains_percent
         && !ends_in_number
         && idna::push_simple_domain_to_ascii(output, input)
     {
         return Ok(UrlHostType::Default);
     }
 
-    let normalized = if input.is_ascii() || input.contains('%') || ends_in_number {
+    let normalized = if input.is_ascii() || contains_percent || ends_in_number {
         legacy::normalize_special_host(input).map_err(|()| Error::TypeError)?
     } else {
         idna::domain_to_ascii(input).map_err(|()| Error::TypeError)?
@@ -2056,8 +2158,7 @@ fn push_decimal_u8(output: &mut String, value: u8) {
     output.push(char::from(b'0' + value % 10));
 }
 
-fn push_ipv6_address(output: &mut String, address: Ipv6Addr) {
-    let segments = address.segments();
+fn push_ipv6_address(output: &mut String, segments: &[u16; 8]) {
     let mut best_start = 0usize;
     let mut best_length = 0usize;
     let mut cursor = 0usize;
@@ -2158,12 +2259,20 @@ fn parse_ipv4_address(input: &str) -> Option<u32> {
 
 #[inline]
 fn split_path_query_fragment(input: &str) -> (&str, Option<&str>, Option<&str>) {
-    let hash = input.find('#');
-    let before_hash = hash.map_or(input, |index| &input[..index]);
-    let query = before_hash.find('?');
-    let path = query.map_or(before_hash, |index| &before_hash[..index]);
-    let query = query.map(|index| &before_hash[index + 1..]);
+    let mut query = None;
+    let mut hash = None;
+    for (index, byte) in input.bytes().enumerate() {
+        if byte == b'?' && query.is_none() {
+            query = Some(index);
+        } else if byte == b'#' {
+            hash = Some(index);
+            break;
+        }
+    }
+    let path_end = query.or(hash).unwrap_or(input.len());
+    let query = query.map(|index| &input[index + 1..hash.unwrap_or(input.len())]);
     let fragment = hash.map(|index| &input[index + 1..]);
+    let path = &input[..path_end];
     (path, query, fragment)
 }
 
@@ -2427,6 +2536,36 @@ fn opaque_host_byte_is_canonical(byte: u8) -> bool {
 #[inline]
 fn host_byte_is_canonical(byte: u8) -> bool {
     BYTE_CLASSES[byte as usize] & BYTE_HOST != 0
+}
+
+#[inline(always)]
+fn eight_bytes_have_class(bytes: &[u8], start: usize, class: u8) -> bool {
+    let &[a, b, c, d, e, f, g, h] = &bytes[start..start + 8] else {
+        unreachable!();
+    };
+    BYTE_CLASSES[a as usize]
+        & BYTE_CLASSES[b as usize]
+        & BYTE_CLASSES[c as usize]
+        & BYTE_CLASSES[d as usize]
+        & BYTE_CLASSES[e as usize]
+        & BYTE_CLASSES[f as usize]
+        & BYTE_CLASSES[g as usize]
+        & BYTE_CLASSES[h as usize]
+        & class
+        != 0
+}
+
+#[inline(always)]
+fn four_bytes_have_class(bytes: &[u8], start: usize, class: u8) -> bool {
+    let &[a, b, c, d] = &bytes[start..start + 4] else {
+        unreachable!();
+    };
+    BYTE_CLASSES[a as usize]
+        & BYTE_CLASSES[b as usize]
+        & BYTE_CLASSES[c as usize]
+        & BYTE_CLASSES[d as usize]
+        & class
+        != 0
 }
 
 #[inline]
