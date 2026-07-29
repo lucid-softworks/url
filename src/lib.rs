@@ -72,8 +72,8 @@ const BYTE_PATH: u8 = 1 << 1;
 const BYTE_SPECIAL_QUERY: u8 = 1 << 2;
 const BYTE_FRAGMENT: u8 = 1 << 3;
 const BYTE_QUERY: u8 = 1 << 4;
-const BYTE_PATH_CONTINUE: u8 = 1 << 5;
 const BYTE_USERINFO: u8 = 1 << 6;
+const BYTE_PATH_NO_DOT: u8 = 1 << 7;
 const BYTE_CLASSES: [u8; 256] = {
     let mut classes = [0u8; 256];
     let mut value = 0usize;
@@ -110,8 +110,8 @@ const BYTE_CLASSES: [u8; 256] = {
             )
         {
             classes[value] |= BYTE_PATH;
-            if byte != b'/' {
-                classes[value] |= BYTE_PATH_CONTINUE;
+            if !matches!(byte, b'.' | b'%') {
+                classes[value] |= BYTE_PATH_NO_DOT;
             }
         }
         if byte >= 0x20 && byte <= 0x7e && !matches!(byte, b' ' | b'"' | b'#' | b'<' | b'>' | b'\'')
@@ -745,11 +745,10 @@ impl UrlAggregator {
         let mut search_start = UrlComponents::OMITTED;
         let mut hash_start = UrlComponents::OMITTED;
         if bytes.get(cursor) == Some(&b'/') {
-            let mut segment_start = cursor + 1;
             cursor += 1;
             while cursor < bytes.len() && !matches!(bytes[cursor], b'?' | b'#') {
                 if cursor + 4 <= bytes.len()
-                    && four_bytes_have_class(bytes, cursor, BYTE_PATH_CONTINUE)
+                    && four_bytes_have_class(bytes, cursor, BYTE_PATH_NO_DOT)
                 {
                     cursor += 4;
                     continue;
@@ -758,16 +757,13 @@ impl UrlAggregator {
                 if !path_byte_is_canonical(byte) {
                     return None;
                 }
-                if byte == b'/' {
-                    if dot_segment(&bytes[segment_start..cursor]) {
-                        return None;
-                    }
-                    segment_start = cursor + 1;
+                if matches!(byte, b'.' | b'%')
+                    && (cursor == pathname_start + 1 || bytes[cursor - 1] == b'/')
+                    && dot_path_segment_at(bytes, cursor)
+                {
+                    return None;
                 }
                 cursor += 1;
-            }
-            if dot_segment(&bytes[segment_start..cursor]) {
-                return None;
             }
         }
         if bytes.get(cursor) == Some(&b'?') {
@@ -2595,6 +2591,21 @@ fn dot_segment(segment: &[u8]) -> bool {
 }
 
 #[inline(always)]
+fn dot_path_segment_at(bytes: &[u8], start: usize) -> bool {
+    if !matches!(bytes.get(start), Some(b'.' | b'%')) {
+        return false;
+    }
+    let mut end = start + 1;
+    while end < bytes.len() && !matches!(bytes[end], b'/' | b'?' | b'#') {
+        if end - start == 6 {
+            return false;
+        }
+        end += 1;
+    }
+    dot_segment(&bytes[start..end])
+}
+
+#[inline(always)]
 fn single_dot_segment(segment: &[u8]) -> bool {
     matches!(segment, b"." | b"%2e" | b"%2E")
 }
@@ -2712,6 +2723,10 @@ mod tests {
             "ws://localhost:3000/socket",
             "https://127.0.0.1:8443/api/v1/health",
             "https://example.com/a%20path?q=already%20encoded",
+            "https://example.com/a/./b",
+            "https://example.com/a/%2e/b",
+            "https://example.com/a/%2e%2E/b",
+            "https://example.com/a/file.name",
         ];
         for input in inputs {
             let fast = UrlAggregator::parse(input).unwrap();

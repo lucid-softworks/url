@@ -100,32 +100,32 @@ Results on an Apple M4 running macOS 26.5.2, Rust 1.97.0, and Apple Clang 21:
 
 | Corpus | Implementation | ns/URL | URLs/s |
 | --- | --- | ---: | ---: |
-| Canonical ASCII | lucid `UrlAggregator` | 56.24 | 17,780,475 |
-| Canonical ASCII | Ada `url_aggregator` | 91.38 | 10,943,511 |
-| Canonical ASCII | lucid `Url` | 57.44 | 17,410,418 |
-| Canonical ASCII | Ada `url` | 71.91 | 13,905,844 |
-| Normalization-heavy | lucid `UrlAggregator` | 103.49 | 9,662,428 |
-| Normalization-heavy | Ada `url_aggregator` | 176.38 | 5,669,445 |
-| Normalization-heavy | lucid `Url` | 104.07 | 9,608,782 |
-| Normalization-heavy | Ada `url` | 129.96 | 7,694,925 |
+| Canonical ASCII | lucid `UrlAggregator` | 55.95 | 17,874,602 |
+| Canonical ASCII | Ada `url_aggregator` | 90.12 | 11,095,732 |
+| Canonical ASCII | lucid `Url` | 56.59 | 17,671,545 |
+| Canonical ASCII | Ada `url` | 71.06 | 14,073,053 |
+| Normalization-heavy | lucid `UrlAggregator` | 103.37 | 9,673,658 |
+| Normalization-heavy | Ada `url_aggregator` | 174.23 | 5,739,645 |
+| Normalization-heavy | lucid `Url` | 99.38 | 10,062,332 |
+| Normalization-heavy | Ada `url` | 127.52 | 7,841,885 |
 
 The real-world corpora exercise parsing plus `get_href_size`, as well as the
 construction-free `can_parse` API:
 
 | Corpus | Implementation | ns/URL | URLs/s |
 | --- | --- | ---: | ---: |
-| Top sites | lucid `UrlAggregator` | 58.83 | 16,997,802 |
-| Top sites | Ada `url_aggregator` | 88.82 | 11,258,325 |
-| Top sites | lucid `Url` | 58.82 | 17,001,702 |
-| Top sites | Ada `url` | 87.73 | 11,398,369 |
-| Top sites | lucid `can_parse` | 13.40 | 74,624,541 |
-| Top sites | Ada `can_parse` | 50.45 | 19,822,733 |
-| 100,025 URLs | lucid `UrlAggregator` | 69.81 | 14,325,422 |
-| 100,025 URLs | Ada `url_aggregator` | 84.88 | 11,781,605 |
-| 100,025 URLs | lucid `Url` | 69.65 | 14,356,574 |
-| 100,025 URLs | Ada `url` | 98.99 | 10,101,873 |
-| 100,025 URLs | lucid `can_parse` | 11.14 | 89,760,951 |
-| 100,025 URLs | Ada `can_parse` | 35.37 | 28,275,480 |
+| Top sites | lucid `UrlAggregator` | 57.30 | 17,451,475 |
+| Top sites | Ada `url_aggregator` | 89.64 | 11,156,354 |
+| Top sites | lucid `Url` | 57.24 | 17,470,450 |
+| Top sites | Ada `url` | 87.93 | 11,373,258 |
+| Top sites | lucid `can_parse` | 13.18 | 75,854,699 |
+| Top sites | Ada `can_parse` | 50.68 | 19,731,629 |
+| 100,025 URLs | lucid `UrlAggregator` | 59.87 | 16,701,701 |
+| 100,025 URLs | Ada `url_aggregator` | 85.38 | 11,712,411 |
+| 100,025 URLs | lucid `Url` | 59.41 | 16,832,274 |
+| 100,025 URLs | Ada `url` | 97.61 | 10,244,771 |
+| 100,025 URLs | lucid `can_parse` | 11.19 | 89,353,711 |
+| 100,025 URLs | Ada `can_parse` | 35.31 | 28,317,968 |
 
 Lucid is faster in every measured operation across the focused, top-sites,
 and 100,025-URL corpora. The corpora remain separate so a combined number
