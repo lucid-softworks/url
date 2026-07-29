@@ -66,6 +66,7 @@ The parser was checked against the Web Platform Tests available during
 development:
 
 - URL parsing and serialization: 891/891
+- `can_parse`: 891/891
 - URL setters: 278/278
 - `IdnaTestV2` through the host parser: 2671/2671
 
@@ -76,7 +77,7 @@ complete WHATWG state machine.
 
 ## Benchmarks
 
-Run the Rust benchmark:
+Run the focused Rust benchmark:
 
 ```sh
 cargo bench --bench parse
@@ -89,26 +90,48 @@ For a pinned comparison against Ada:
 ```
 
 The harness uses the same URL corpora, operation, warm-up policy, sample count,
-and median calculation for both implementations. Ada is pinned to commit
-`30f3f3020c5a979b62f90dc9c37fd45de3cc84d7`.
+and median calculation for both implementations. The comparison script also
+fetches Ada's 100,025-URL dataset at commit
+`9749b92c13e970e70409948fa862461191504ccc`. Ada is pinned to the exact
+[Ada v4 release benchmark](https://www.yagiz.co/release-of-ada-v4) commit,
+`16a5772360d4b901fc3b35ee1ee6947782ab9491`.
 
 Results on an Apple M4 running macOS 26.5.2, Rust 1.97.0, and Apple Clang 21:
 
 | Corpus | Implementation | ns/URL | URLs/s |
 | --- | --- | ---: | ---: |
-| Canonical ASCII | lucid `UrlAggregator` | 94.74 | 10,555,436 |
-| Canonical ASCII | Ada `url_aggregator` | 94.39 | 10,594,374 |
-| Canonical ASCII | lucid `Url` | 93.73 | 10,668,823 |
-| Canonical ASCII | Ada `url` | 69.55 | 14,377,759 |
-| Normalization-heavy | lucid `UrlAggregator` | 123.08 | 8,124,654 |
-| Normalization-heavy | Ada `url_aggregator` | 173.86 | 5,751,804 |
-| Normalization-heavy | lucid `Url` | 123.76 | 8,080,410 |
-| Normalization-heavy | Ada `url` | 130.38 | 7,669,859 |
+| Canonical ASCII | lucid `UrlAggregator` | 72.26 | 13,839,137 |
+| Canonical ASCII | Ada `url_aggregator` | 93.07 | 10,744,112 |
+| Canonical ASCII | lucid `Url` | 73.18 | 13,664,172 |
+| Canonical ASCII | Ada `url` | 70.52 | 14,179,391 |
+| Normalization-heavy | lucid `UrlAggregator` | 115.64 | 8,647,830 |
+| Normalization-heavy | Ada `url_aggregator` | 173.65 | 5,758,705 |
+| Normalization-heavy | lucid `Url` | 115.54 | 8,655,046 |
+| Normalization-heavy | Ada `url` | 130.81 | 7,644,627 |
 
-On the normalization-heavy corpus, lucid is about 29% faster than Ada's
-`url_aggregator` and about 5% faster than Ada's `url`. The canonical corpus is
-shown separately because combining the two workloads would hide their
-different performance characteristics.
+The real-world corpora exercise parsing plus `get_href_size`, as well as the
+construction-free `can_parse` API:
+
+| Corpus | Implementation | ns/URL | URLs/s |
+| --- | --- | ---: | ---: |
+| Top sites | lucid `UrlAggregator` | 72.95 | 13,708,544 |
+| Top sites | Ada `url_aggregator` | 87.43 | 11,437,794 |
+| Top sites | lucid `Url` | 72.58 | 13,777,480 |
+| Top sites | Ada `url` | 89.05 | 11,229,505 |
+| Top sites | lucid `can_parse` | 29.71 | 33,658,651 |
+| Top sites | Ada `can_parse` | 50.30 | 19,881,109 |
+| 100,025 URLs | lucid `UrlAggregator` | 84.48 | 11,836,695 |
+| 100,025 URLs | Ada `url_aggregator` | 85.39 | 11,710,671 |
+| 100,025 URLs | lucid `Url` | 84.78 | 11,795,808 |
+| 100,025 URLs | Ada `url` | 98.24 | 10,179,108 |
+| 100,025 URLs | lucid `can_parse` | 26.92 | 37,149,350 |
+| 100,025 URLs | Ada `can_parse` | 35.48 | 28,182,357 |
+
+Lucid is faster across the 100,025-URL corpus, all three top-sites operations,
+and both normalization-heavy representations. Ada remains faster for the
+setter-oriented `url` representation on the focused canonical ASCII corpus.
+The corpora remain separate so a combined number cannot hide
+workload-specific behavior.
 
 ## License
 

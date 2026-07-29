@@ -16,6 +16,10 @@ name = "lucid_url"
 name = "parse"
 harness = false
 
+[[bench]]
+name = "real_world"
+harness = false
+
 [dependencies]
 
 [dev-dependencies]

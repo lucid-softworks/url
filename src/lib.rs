@@ -8,7 +8,6 @@
 //!   getters allocation-free.
 
 use std::fmt;
-use std::fmt::Write as _;
 use std::net::Ipv6Addr;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -70,6 +69,62 @@ impl UrlComponents {
 const FLAG_HOSTNAME: u8 = 1 << 0;
 const FLAG_PASSWORD: u8 = 1 << 1;
 const FLAG_OPAQUE_PATH: u8 = 1 << 2;
+const BYTE_HOST: u8 = 1 << 0;
+const BYTE_PATH: u8 = 1 << 1;
+const BYTE_SPECIAL_QUERY: u8 = 1 << 2;
+const BYTE_FRAGMENT: u8 = 1 << 3;
+const BYTE_QUERY: u8 = 1 << 4;
+const BYTE_CLASSES: [u8; 256] = {
+    let mut classes = [0u8; 256];
+    let mut value = 0usize;
+    while value < classes.len() {
+        let byte = value as u8;
+        let alphanumeric = byte.is_ascii_alphanumeric();
+        if byte.is_ascii_lowercase()
+            || byte.is_ascii_digit()
+            || matches!(byte, b'-' | b'.' | b'_' | b'~')
+        {
+            classes[value] |= BYTE_HOST;
+        }
+        if alphanumeric
+            || matches!(
+                byte,
+                b'/' | b'-'
+                    | b'.'
+                    | b'_'
+                    | b'~'
+                    | b'!'
+                    | b'$'
+                    | b'&'
+                    | b'\''
+                    | b'('
+                    | b')'
+                    | b'*'
+                    | b'+'
+                    | b','
+                    | b';'
+                    | b'='
+                    | b':'
+                    | b'@'
+                    | b'%'
+            )
+        {
+            classes[value] |= BYTE_PATH;
+        }
+        if byte >= 0x20 && byte <= 0x7e && !matches!(byte, b' ' | b'"' | b'#' | b'<' | b'>' | b'\'')
+        {
+            classes[value] |= BYTE_SPECIAL_QUERY;
+        }
+        if byte >= 0x20 && byte <= 0x7e && !matches!(byte, b' ' | b'"' | b'<' | b'>' | b'`') {
+            classes[value] |= BYTE_FRAGMENT;
+        }
+        if byte >= 0x20 && byte <= 0x7e && !matches!(byte, b' ' | b'"' | b'#' | b'<' | b'>') {
+            classes[value] |= BYTE_QUERY;
+        }
+        value += 1;
+    }
+    classes
+};
 
 /// Setter-oriented URL representation with Ada-compatible owned getters.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -104,8 +159,23 @@ pub fn parse<T: ParseTarget>(input: &str, base: Option<&T>) -> Result<T> {
 
 /// Return whether `input` parses, optionally resolving it against `base`.
 pub fn can_parse(input: &str, base: Option<&str>) -> bool {
-    if input.len() > get_max_input_length() as usize {
+    let limit = get_max_input_length();
+    if input.len() > limit as usize {
         return false;
+    }
+    if base.is_none() && limit == u32::MAX {
+        if let Some(result) = try_can_parse_clean_http(input) {
+            return result;
+        }
+        if let Some(result) = UrlAggregator::try_fast_clean_http_components(input) {
+            return result.is_ok();
+        }
+        if let Some(result) = try_can_parse_clean_non_special(input) {
+            return result;
+        }
+        if let Some(result) = UrlAggregator::try_fast_clean_non_special_absolute(input) {
+            return result.is_ok();
+        }
     }
     match base {
         None => legacy::Url::parse(input).is_ok(),
@@ -116,6 +186,171 @@ pub fn can_parse(input: &str, base: Option<&str>) -> bool {
             legacy::Url::parse_with_base(input, &base_url).is_ok()
         }
     }
+}
+
+fn try_can_parse_clean_http(input: &str) -> Option<bool> {
+    let bytes = input.as_bytes();
+    let authority_start = if bytes.starts_with(b"https://") {
+        8usize
+    } else if bytes.starts_with(b"http://") {
+        7usize
+    } else {
+        return None;
+    };
+    if authority_start >= bytes.len() {
+        return Some(false);
+    }
+    if bytes[authority_start] == b'[' {
+        let closing = bytes[authority_start + 1..]
+            .iter()
+            .position(|&byte| byte == b']')
+            .map(|offset| authority_start + 1 + offset)?;
+        if Ipv6Addr::from_str(&input[authority_start + 1..closing]).is_err() {
+            return Some(false);
+        }
+        let mut cursor = closing + 1;
+        if bytes.get(cursor) == Some(&b':') {
+            cursor += 1;
+            let port_start = cursor;
+            let mut port = 0u32;
+            while cursor < bytes.len() && !matches!(bytes[cursor], b'/' | b'?' | b'#') {
+                let byte = bytes[cursor];
+                if !byte.is_ascii_digit() {
+                    return Some(false);
+                }
+                port = port
+                    .checked_mul(10)
+                    .and_then(|value| value.checked_add(u32::from(byte - b'0')))
+                    .unwrap_or(u32::MAX);
+                if port > u32::from(u16::MAX) {
+                    return Some(false);
+                }
+                cursor += 1;
+            }
+            if cursor == port_start {
+                return None;
+            }
+        } else if !matches!(bytes.get(cursor), None | Some(b'/' | b'?' | b'#')) {
+            return Some(false);
+        }
+        return Some(true);
+    }
+
+    let mut cursor = authority_start;
+    let mut host_end = usize::MAX;
+    let mut port_digits = 0usize;
+    let mut port_value = 0u32;
+    let mut last_label_start = authority_start;
+    let mut numeric_host = true;
+    while cursor < bytes.len() {
+        let byte = bytes[cursor];
+        if matches!(byte, b'/' | b'?' | b'#') {
+            break;
+        }
+        if host_end != usize::MAX {
+            if !byte.is_ascii_digit() {
+                return None;
+            }
+            port_digits += 1;
+            port_value = port_value
+                .checked_mul(10)
+                .and_then(|value| value.checked_add(u32::from(byte - b'0')))
+                .unwrap_or(u32::MAX);
+            if port_value > u32::from(u16::MAX) {
+                return Some(false);
+            }
+        } else if byte == b':' {
+            if cursor == authority_start {
+                return None;
+            }
+            host_end = cursor;
+        } else {
+            if !host_byte_is_canonical(byte) {
+                return None;
+            }
+            if byte == b'.' {
+                last_label_start = cursor + 1;
+            } else if !byte.is_ascii_digit() {
+                numeric_host = false;
+            }
+        }
+        cursor += 1;
+    }
+
+    let host_end = if host_end == usize::MAX {
+        cursor
+    } else {
+        if port_digits == 0 {
+            return None;
+        }
+        host_end
+    };
+    if host_end == authority_start {
+        return Some(false);
+    }
+    if bytes.get(host_end.wrapping_sub(1)) == Some(&b'.') {
+        return None;
+    }
+    if bytes.get(last_label_start).is_some_and(u8::is_ascii_digit)
+        && (!numeric_host || !canonical_ipv4(&input[authority_start..host_end]))
+    {
+        return None;
+    }
+    Some(true)
+}
+
+fn try_can_parse_clean_non_special(input: &str) -> Option<bool> {
+    let bytes = input.as_bytes();
+    let colon = bytes.iter().position(|&byte| byte == b':')?;
+    let scheme = &input[..colon];
+    if scheme.is_empty()
+        || !scheme.as_bytes()[0].is_ascii_lowercase()
+        || !scheme.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'+' | b'-' | b'.')
+        })
+        || SpecialScheme::from_input(scheme).is_some()
+        || bytes.get(colon + 1..colon + 3) != Some(b"//")
+    {
+        return None;
+    }
+
+    let authority_start = colon + 3;
+    let authority_end = bytes[authority_start..]
+        .iter()
+        .position(|&byte| matches!(byte, b'/' | b'?' | b'#'))
+        .map_or(bytes.len(), |offset| authority_start + offset);
+    let authority = &bytes[authority_start..authority_end];
+    let at = authority.iter().rposition(|&byte| byte == b'@');
+    if at.is_some_and(|offset| authority[..offset].contains(&b'@')) {
+        return None;
+    }
+    let userinfo_end = at.map(|offset| authority_start + offset);
+    let host_start = userinfo_end.map_or(authority_start, |end| end + 1);
+    if let Some(end) = userinfo_end {
+        if end == authority_start
+            || bytes[authority_start..end]
+                .iter()
+                .any(|&byte| !userinfo_byte_is_canonical(byte))
+        {
+            return None;
+        }
+    }
+    let host_and_port = &bytes[host_start..authority_end];
+    let port_colon = host_and_port.iter().rposition(|&byte| byte == b':');
+    let host_end = port_colon.map_or(authority_end, |offset| host_start + offset);
+    if port_colon.is_some() && host_end == host_start {
+        return None;
+    }
+    if bytes[host_start..host_end]
+        .iter()
+        .any(|&byte| !opaque_host_byte_is_canonical(byte))
+    {
+        return None;
+    }
+    if port_colon.is_some() && input[host_end + 1..authority_end].parse::<u16>().is_err() {
+        return None;
+    }
+    Some(true)
 }
 
 /// Resolve `input` against an absolute base URL.
@@ -171,10 +406,13 @@ impl ParseTarget for Url {
 impl ParseTarget for UrlAggregator {
     #[inline]
     fn parse_target(input: &str, base: Option<&Self>) -> Result<Self> {
-        if input.len() > get_max_input_length() as usize || input.len() > u32::MAX as usize {
+        if input.len() > get_max_input_length() as usize {
             return Err(Error::TypeError);
         }
         if base.is_none() {
+            if let Some(parsed) = Self::try_fast_clean_http_absolute(input) {
+                return parsed;
+            }
             if let Some(hint) = normalization_hint(input) {
                 let parsed = match hint {
                     NormalizationHint::Special {
@@ -186,6 +424,9 @@ impl ParseTarget for UrlAggregator {
                         Self::normalize_opaque_absolute(input, colon, &input[..colon])
                     }
                 };
+                return parsed;
+            }
+            if let Some(parsed) = Self::try_fast_clean_non_special_absolute(input) {
                 return parsed;
             }
             if let Some(parsed) = Self::try_fast_absolute(input) {
@@ -218,6 +459,292 @@ impl UrlAggregator {
     /// Parse a URL relative to `base`.
     pub fn parse_with_base(input: &str, base: &Self) -> Result<Self> {
         parse(input, Some(base))
+    }
+
+    /// Parse a canonical HTTP(S) URL while touching each input byte once.
+    /// Credentials, IPv6, unusual IPv4 forms, and normalization all fall
+    /// through to the broader fast paths.
+    #[inline(always)]
+    fn try_fast_clean_http_absolute(input: &str) -> Option<Result<Self>> {
+        let components = match Self::try_fast_clean_http_components(input)? {
+            Ok(components) => components,
+            Err(error) => return Some(Err(error)),
+        };
+        let mut search_start = components.search_start;
+        let mut hash_start = components.hash_start;
+        let buffer = if input.as_bytes().get(components.pathname_start) == Some(&b'/') {
+            input.to_owned()
+        } else {
+            if input.len() == get_max_input_length() as usize {
+                return Some(Err(Error::TypeError));
+            }
+            let mut buffer = String::with_capacity(input.len() + 1);
+            buffer.push_str(&input[..components.pathname_start]);
+            buffer.push('/');
+            buffer.push_str(&input[components.pathname_start..]);
+            if search_start != UrlComponents::OMITTED {
+                search_start += 1;
+            }
+            if hash_start != UrlComponents::OMITTED {
+                hash_start += 1;
+            }
+            buffer
+        };
+        Some(Ok(Self {
+            components: UrlComponents {
+                protocol_end: components.protocol_end as u32,
+                username_end: components.authority_start as u32,
+                host_start: components.authority_start as u32,
+                host_end: components.host_end as u32,
+                port: UrlComponents::OMITTED,
+                pathname_start: components.pathname_start as u32,
+                search_start,
+                hash_start,
+            },
+            buffer,
+            flags: FLAG_HOSTNAME,
+            host_type: UrlHostType::Default,
+        }))
+    }
+
+    fn try_fast_clean_non_special_absolute(input: &str) -> Option<Result<Self>> {
+        let bytes = input.as_bytes();
+        let colon = bytes.iter().position(|&byte| byte == b':')?;
+        let scheme = &input[..colon];
+        if scheme.is_empty()
+            || !scheme.as_bytes()[0].is_ascii_lowercase()
+            || !scheme.bytes().all(|byte| {
+                byte.is_ascii_lowercase()
+                    || byte.is_ascii_digit()
+                    || matches!(byte, b'+' | b'-' | b'.')
+            })
+            || SpecialScheme::from_input(scheme).is_some()
+            || bytes.get(colon + 1..colon + 3) != Some(b"//")
+        {
+            return None;
+        }
+
+        let authority_start = colon + 3;
+        let authority_end = bytes[authority_start..]
+            .iter()
+            .position(|&byte| matches!(byte, b'/' | b'?' | b'#'))
+            .map_or(bytes.len(), |offset| authority_start + offset);
+        let authority = &bytes[authority_start..authority_end];
+        let at = authority.iter().rposition(|&byte| byte == b'@');
+        if at.is_some_and(|offset| authority[..offset].contains(&b'@')) {
+            return None;
+        }
+        let userinfo_end = at.map(|offset| authority_start + offset);
+        let host_start = userinfo_end.map_or(authority_start, |end| end + 1);
+        let username_end = userinfo_end.map_or(host_start, |end| {
+            bytes[authority_start..end]
+                .iter()
+                .position(|&byte| byte == b':')
+                .map_or(end, |offset| authority_start + offset)
+        });
+        if let Some(end) = userinfo_end {
+            if end == authority_start
+                || bytes.get(end.wrapping_sub(1)) == Some(&b':')
+                || bytes[authority_start..end]
+                    .iter()
+                    .any(|&byte| !userinfo_byte_is_canonical(byte))
+            {
+                return None;
+            }
+        }
+
+        let host_and_port = &bytes[host_start..authority_end];
+        if host_and_port.starts_with(b"[") {
+            return None;
+        }
+        let port_colon = host_and_port.iter().rposition(|&byte| byte == b':');
+        let host_end = port_colon.map_or(authority_end, |offset| host_start + offset);
+        if port_colon.is_some() && host_end == host_start {
+            return None;
+        }
+        if bytes[host_start..host_end]
+            .iter()
+            .any(|&byte| !opaque_host_byte_is_canonical(byte))
+        {
+            return None;
+        }
+        let port = if port_colon.is_some() {
+            let Ok(port) = input[host_end + 1..authority_end].parse::<u16>() else {
+                return None;
+            };
+            u32::from(port)
+        } else {
+            UrlComponents::OMITTED
+        };
+
+        let pathname_start = authority_end;
+        let mut search_start = UrlComponents::OMITTED;
+        let mut hash_start = UrlComponents::OMITTED;
+        let mut cursor = authority_end;
+        if bytes.get(cursor) == Some(&b'/') {
+            let mut segment_start = cursor + 1;
+            cursor += 1;
+            while cursor < bytes.len() && !matches!(bytes[cursor], b'?' | b'#') {
+                let byte = bytes[cursor];
+                if !path_byte_is_canonical(byte) {
+                    return None;
+                }
+                if byte == b'/' {
+                    if dot_segment(&bytes[segment_start..cursor]) {
+                        return None;
+                    }
+                    segment_start = cursor + 1;
+                }
+                cursor += 1;
+            }
+            if dot_segment(&bytes[segment_start..cursor]) {
+                return None;
+            }
+        }
+        if bytes.get(cursor) == Some(&b'?') {
+            search_start = cursor as u32;
+            cursor += 1;
+            while cursor < bytes.len() && bytes[cursor] != b'#' {
+                if BYTE_CLASSES[bytes[cursor] as usize] & BYTE_QUERY == 0 {
+                    return None;
+                }
+                cursor += 1;
+            }
+        }
+        if bytes.get(cursor) == Some(&b'#') {
+            hash_start = cursor as u32;
+            cursor += 1;
+            while cursor < bytes.len() {
+                if !fragment_byte_is_canonical(bytes[cursor]) {
+                    return None;
+                }
+                cursor += 1;
+            }
+        }
+        if cursor != bytes.len() {
+            return None;
+        }
+
+        let buffer = input.to_owned();
+        Some(Ok(Self {
+            components: UrlComponents {
+                protocol_end: colon as u32,
+                username_end: username_end as u32,
+                host_start: host_start as u32,
+                host_end: host_end as u32,
+                port,
+                pathname_start: pathname_start as u32,
+                search_start,
+                hash_start,
+            },
+            buffer,
+            flags: FLAG_HOSTNAME
+                | if userinfo_end.is_some_and(|end| username_end < end) {
+                    FLAG_PASSWORD
+                } else {
+                    0
+                },
+            host_type: UrlHostType::Default,
+        }))
+    }
+
+    fn try_fast_clean_http_components(input: &str) -> Option<Result<FastHttpComponents>> {
+        let bytes = input.as_bytes();
+        let protocol_end = if bytes.starts_with(b"https://") {
+            5usize
+        } else if bytes.starts_with(b"http://") {
+            4usize
+        } else {
+            return None;
+        };
+        let authority_start = protocol_end + 3;
+        if authority_start >= bytes.len() {
+            return Some(Err(Error::TypeError));
+        }
+
+        let mut cursor = authority_start;
+        while cursor < bytes.len() {
+            let byte = bytes[cursor];
+            if matches!(byte, b'/' | b'?' | b'#') {
+                break;
+            }
+            if !host_byte_is_canonical(byte) {
+                return None;
+            }
+            cursor += 1;
+        }
+
+        let host_end = cursor;
+        if host_end == authority_start {
+            return Some(Err(Error::TypeError));
+        }
+        if bytes.get(host_end.wrapping_sub(1)) == Some(&b'.') {
+            return None;
+        }
+
+        let hostname = &bytes[authority_start..host_end];
+        let last = hostname.last().copied();
+        if last.is_some_and(|byte| byte.is_ascii_digit())
+            || (last == Some(b'x') && (hostname == b"0x" || hostname.ends_with(b".0x")))
+        {
+            return None;
+        }
+
+        let pathname_start = cursor;
+        let mut search_start = UrlComponents::OMITTED;
+        let mut hash_start = UrlComponents::OMITTED;
+        if bytes.get(cursor) == Some(&b'/') {
+            let mut segment_start = cursor + 1;
+            cursor += 1;
+            while cursor < bytes.len() && !matches!(bytes[cursor], b'?' | b'#') {
+                let byte = bytes[cursor];
+                if !path_byte_is_canonical(byte) {
+                    return None;
+                }
+                if byte == b'/' {
+                    if dot_segment(&bytes[segment_start..cursor]) {
+                        return None;
+                    }
+                    segment_start = cursor + 1;
+                }
+                cursor += 1;
+            }
+            if dot_segment(&bytes[segment_start..cursor]) {
+                return None;
+            }
+        }
+        if bytes.get(cursor) == Some(&b'?') {
+            search_start = cursor as u32;
+            cursor += 1;
+            while cursor < bytes.len() && bytes[cursor] != b'#' {
+                if !special_query_byte_is_canonical(bytes[cursor]) {
+                    return None;
+                }
+                cursor += 1;
+            }
+        }
+        if bytes.get(cursor) == Some(&b'#') {
+            hash_start = cursor as u32;
+            cursor += 1;
+            while cursor < bytes.len() {
+                if !fragment_byte_is_canonical(bytes[cursor]) {
+                    return None;
+                }
+                cursor += 1;
+            }
+        }
+        if cursor != bytes.len() {
+            return None;
+        }
+
+        Some(Ok(FastHttpComponents {
+            protocol_end,
+            authority_start,
+            host_end,
+            pathname_start,
+            search_start,
+            hash_start,
+        }))
     }
 
     fn from_record(record: &legacy::Url) -> Result<Self> {
@@ -1290,6 +1817,15 @@ enum NormalizationHint {
     },
 }
 
+struct FastHttpComponents {
+    protocol_end: usize,
+    authority_start: usize,
+    host_end: usize,
+    pathname_start: usize,
+    search_start: u32,
+    hash_start: u32,
+}
+
 impl SpecialScheme {
     #[inline]
     fn from_input(input: &str) -> Option<Self> {
@@ -1445,7 +1981,7 @@ fn push_normalized_special_host(output: &mut String, input: &str) -> Result<UrlH
         .and_then(|input| input.strip_suffix(']'))
         .and_then(|input| Ipv6Addr::from_str(input).ok())
     {
-        write!(output, "[{address}]").map_err(|_| Error::TypeError)?;
+        push_ipv6_address(output, address);
         return Ok(UrlHostType::Ipv6);
     }
 
@@ -1471,15 +2007,13 @@ fn push_normalized_special_host(output: &mut String, input: &str) -> Result<UrlH
 
     if ends_in_number && input.is_ascii() && !input.contains('%') {
         if let Some(address) = parse_ipv4_address(input) {
-            write!(
-                output,
-                "{}.{}.{}.{}",
-                address >> 24,
-                (address >> 16) & 0xff,
-                (address >> 8) & 0xff,
-                address & 0xff
-            )
-            .map_err(|_| Error::TypeError)?;
+            push_decimal_u8(output, (address >> 24) as u8);
+            output.push('.');
+            push_decimal_u8(output, (address >> 16) as u8);
+            output.push('.');
+            push_decimal_u8(output, (address >> 8) as u8);
+            output.push('.');
+            push_decimal_u8(output, address as u8);
             return Ok(UrlHostType::Ipv4);
         }
     }
@@ -1509,6 +2043,73 @@ fn push_normalized_special_host(output: &mut String, input: &str) -> Result<UrlH
     } else {
         Ok(UrlHostType::Default)
     }
+}
+
+#[inline]
+fn push_decimal_u8(output: &mut String, value: u8) {
+    if value >= 100 {
+        output.push(char::from(b'0' + value / 100));
+        output.push(char::from(b'0' + (value / 10) % 10));
+    } else if value >= 10 {
+        output.push(char::from(b'0' + value / 10));
+    }
+    output.push(char::from(b'0' + value % 10));
+}
+
+fn push_ipv6_address(output: &mut String, address: Ipv6Addr) {
+    let segments = address.segments();
+    let mut best_start = 0usize;
+    let mut best_length = 0usize;
+    let mut cursor = 0usize;
+    while cursor < segments.len() {
+        if segments[cursor] != 0 {
+            cursor += 1;
+            continue;
+        }
+        let start = cursor;
+        while cursor < segments.len() && segments[cursor] == 0 {
+            cursor += 1;
+        }
+        let length = cursor - start;
+        if length > best_length {
+            best_start = start;
+            best_length = length;
+        }
+    }
+    if best_length < 2 {
+        best_length = 0;
+    }
+
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    output.push('[');
+    let mut index = 0usize;
+    while index < segments.len() {
+        if best_length > 0 && index == best_start {
+            output.push_str("::");
+            index += best_length;
+            if index == segments.len() {
+                break;
+            }
+        } else {
+            if index > 0 && (best_length == 0 || index != best_start + best_length) {
+                output.push(':');
+            }
+            let value = segments[index];
+            let mut shift = 12u32;
+            while shift > 0 && ((value >> shift) & 0xf) == 0 {
+                shift -= 4;
+            }
+            loop {
+                output.push(char::from(HEX[((value >> shift) & 0xf) as usize]));
+                if shift == 0 {
+                    break;
+                }
+                shift -= 4;
+            }
+            index += 1;
+        }
+    }
+    output.push(']');
 }
 
 #[inline]
@@ -1584,7 +2185,6 @@ fn push_normalized_path(output: &mut String, path: &str, is_file: bool) -> Resul
     if !matches!(path.as_bytes().first(), Some(b'/' | b'\\')) {
         return Err(Error::TypeError);
     }
-
     let path_start = output.len();
     output.push('/');
     let mut segments = 0usize;
@@ -1690,6 +2290,59 @@ fn normalization_hint(input: &str) -> Option<NormalizationHint> {
         return None;
     }
 
+    if input.starts_with("file:") {
+        if matches!(bytes.get(5), Some(b'/' | b'\\')) && matches!(bytes.get(6), Some(b'/' | b'\\'))
+        {
+            return Some(NormalizationHint::Special {
+                colon: 4,
+                scheme: SpecialScheme::File,
+                authority_end: None,
+            });
+        }
+        return None;
+    }
+    if input.starts_with("mailto:") {
+        if matches!(bytes.get(7), Some(b'/' | b'\\')) {
+            return None;
+        }
+        return Some(NormalizationHint::Opaque { colon: 6 });
+    }
+    if input.starts_with("https:\\\\") {
+        return Some(NormalizationHint::Special {
+            colon: 5,
+            scheme: SpecialScheme::Https,
+            authority_end: None,
+        });
+    }
+    if input.starts_with("http:\\\\") {
+        return Some(NormalizationHint::Special {
+            colon: 4,
+            scheme: SpecialScheme::Http,
+            authority_end: None,
+        });
+    }
+    if input.starts_with("ftp:\\\\") {
+        return Some(NormalizationHint::Special {
+            colon: 3,
+            scheme: SpecialScheme::Ftp,
+            authority_end: None,
+        });
+    }
+    if input.starts_with("wss:\\\\") {
+        return Some(NormalizationHint::Special {
+            colon: 3,
+            scheme: SpecialScheme::Wss,
+            authority_end: None,
+        });
+    }
+    if input.starts_with("ws:\\\\") {
+        return Some(NormalizationHint::Special {
+            colon: 2,
+            scheme: SpecialScheme::Ws,
+            authority_end: None,
+        });
+    }
+
     let (authority_start, colon, scheme) = if input.starts_with("http://") {
         (7, 4, SpecialScheme::Http)
     } else if input.starts_with("https://") {
@@ -1700,51 +2353,6 @@ fn normalization_hint(input: &str) -> Option<NormalizationHint> {
         (6, 3, SpecialScheme::Wss)
     } else if input.starts_with("ws://") {
         (5, 2, SpecialScheme::Ws)
-    } else if input.starts_with("file:") {
-        if matches!(bytes.get(5), Some(b'/' | b'\\')) && matches!(bytes.get(6), Some(b'/' | b'\\'))
-        {
-            return Some(NormalizationHint::Special {
-                colon: 4,
-                scheme: SpecialScheme::File,
-                authority_end: None,
-            });
-        }
-        return None;
-    } else if input.starts_with("mailto:") {
-        if matches!(bytes.get(7), Some(b'/' | b'\\')) {
-            return None;
-        }
-        return Some(NormalizationHint::Opaque { colon: 6 });
-    } else if input.starts_with("https:\\\\") {
-        return Some(NormalizationHint::Special {
-            colon: 5,
-            scheme: SpecialScheme::Https,
-            authority_end: None,
-        });
-    } else if input.starts_with("http:\\\\") {
-        return Some(NormalizationHint::Special {
-            colon: 4,
-            scheme: SpecialScheme::Http,
-            authority_end: None,
-        });
-    } else if input.starts_with("ftp:\\\\") {
-        return Some(NormalizationHint::Special {
-            colon: 3,
-            scheme: SpecialScheme::Ftp,
-            authority_end: None,
-        });
-    } else if input.starts_with("wss:\\\\") {
-        return Some(NormalizationHint::Special {
-            colon: 3,
-            scheme: SpecialScheme::Wss,
-            authority_end: None,
-        });
-    } else if input.starts_with("ws:\\\\") {
-        return Some(NormalizationHint::Special {
-            colon: 2,
-            scheme: SpecialScheme::Ws,
-            authority_end: None,
-        });
     } else {
         return None;
     };
@@ -1756,7 +2364,7 @@ fn normalization_hint(input: &str) -> Option<NormalizationHint> {
         if matches!(byte, b'\t' | b'\n' | b'\r') {
             return None;
         }
-        if matches!(byte, b' ' | b'[') || !byte.is_ascii() {
+        if matches!(byte, b' ' | b'[') || !byte.is_ascii() || byte.is_ascii_uppercase() {
             return Some(NormalizationHint::Special {
                 colon,
                 scheme,
@@ -1797,34 +2405,33 @@ fn userinfo_byte_is_canonical(byte: u8) -> bool {
 }
 
 #[inline]
+fn opaque_host_byte_is_canonical(byte: u8) -> bool {
+    (0x20..=0x7e).contains(&byte)
+        && !matches!(
+            byte,
+            b' ' | b'#'
+                | b'/'
+                | b':'
+                | b'<'
+                | b'>'
+                | b'?'
+                | b'@'
+                | b'['
+                | b'\\'
+                | b']'
+                | b'^'
+                | b'|'
+        )
+}
+
+#[inline]
 fn host_byte_is_canonical(byte: u8) -> bool {
-    byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'-' | b'.' | b'_' | b'~')
+    BYTE_CLASSES[byte as usize] & BYTE_HOST != 0
 }
 
 #[inline]
 fn path_byte_is_canonical(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric()
-        || matches!(
-            byte,
-            b'/' | b'-'
-                | b'.'
-                | b'_'
-                | b'~'
-                | b'!'
-                | b'$'
-                | b'&'
-                | b'\''
-                | b'('
-                | b')'
-                | b'*'
-                | b'+'
-                | b','
-                | b';'
-                | b'='
-                | b':'
-                | b'@'
-                | b'%'
-        )
+    BYTE_CLASSES[byte as usize] & BYTE_PATH != 0
 }
 
 fn canonical_path(path: &[u8]) -> bool {
@@ -1843,14 +2450,17 @@ fn canonical_path(path: &[u8]) -> bool {
     !dot_segment(&path[segment_start..])
 }
 
+#[inline(always)]
 fn dot_segment(segment: &[u8]) -> bool {
     single_dot_segment(segment) || double_dot_segment(segment)
 }
 
+#[inline(always)]
 fn single_dot_segment(segment: &[u8]) -> bool {
     matches!(segment, b"." | b"%2e" | b"%2E")
 }
 
+#[inline(always)]
 fn double_dot_segment(segment: &[u8]) -> bool {
     matches!(
         segment,
@@ -1868,12 +2478,12 @@ fn double_dot_segment(segment: &[u8]) -> bool {
 
 #[inline]
 fn special_query_byte_is_canonical(byte: u8) -> bool {
-    (0x20..=0x7e).contains(&byte) && !matches!(byte, b' ' | b'"' | b'#' | b'<' | b'>' | b'\'')
+    BYTE_CLASSES[byte as usize] & BYTE_SPECIAL_QUERY != 0
 }
 
 #[inline]
 fn fragment_byte_is_canonical(byte: u8) -> bool {
-    (0x20..=0x7e).contains(&byte) && !matches!(byte, b' ' | b'"' | b'<' | b'>' | b'`')
+    BYTE_CLASSES[byte as usize] & BYTE_FRAGMENT != 0
 }
 
 fn canonical_ipv4(hostname: &str) -> bool {
@@ -2015,9 +2625,30 @@ mod tests {
             "http://xn--bcher-kva.example/stra%C3%9Fe"
         );
         assert_eq!(
+            UrlAggregator::parse("http://[1:0:1:0:1:0:1:0]")
+                .unwrap()
+                .get_href(),
+            "http://[1:0:1:0:1:0:1:0]/"
+        );
+        assert_eq!(
             UrlAggregator::parse("http://xn--/").unwrap().get_hostname(),
             "xn--"
         );
         assert!(UrlAggregator::parse("http://xn--a-ä.pt/").is_err());
+    }
+
+    #[test]
+    fn handles_canonical_non_special_authorities() {
+        let input = "postgresql://other:9818274x1!!@localhost:5432/otherdb?connect_timeout=10";
+        let url = UrlAggregator::parse(input).unwrap();
+        assert_eq!(url.get_href(), input);
+        assert_eq!(url.get_protocol(), "postgresql:");
+        assert_eq!(url.get_username(), "other");
+        assert_eq!(url.get_password(), "9818274x1!!");
+        assert_eq!(url.get_hostname(), "localhost");
+        assert_eq!(url.get_port(), "5432");
+        assert_eq!(url.get_pathname(), "/otherdb");
+        assert!(can_parse(input, None));
+        assert!(!can_parse("sc://@/", None));
     }
 }
