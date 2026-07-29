@@ -1,0 +1,34 @@
+[package]
+name = "lucid-url"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.87"
+description = "A dependency-free WHATWG URL parser with an Ada-compatible interface"
+license = "MIT"
+repository = "https://github.com/lucid-softworks/url"
+keywords = ["url", "whatwg", "parser", "ada", "web"]
+categories = ["parser-implementations", "web-programming"]
+
+[lib]
+name = "lucid_url"
+
+[[bench]]
+name = "parse"
+harness = false
+
+[dependencies]
+
+[dev-dependencies]
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+
+[profile.bench]
+inherits = "release"
+
+[lints.rust]
+unsafe_code = "forbid"
