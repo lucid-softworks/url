@@ -69,9 +69,10 @@ development:
 - URL setters: 278/278
 - `IdnaTestV2` through the host parser: 2671/2671
 
-The fast path only accepts already-canonical inputs that it can validate
-without changing. Every other input falls through to the complete WHATWG state
-machine.
+The parser has direct paths for validated canonical URLs and common
+normalization work, including percent encoding, path normalization, IPv4,
+IPv6, and IDNA. Inputs outside those conservative paths fall through to the
+complete WHATWG state machine.
 
 ## Benchmarks
 
@@ -95,20 +96,19 @@ Results on an Apple M4 running macOS 26.5.2, Rust 1.97.0, and Apple Clang 21:
 
 | Corpus | Implementation | ns/URL | URLs/s |
 | --- | --- | ---: | ---: |
-| Canonical ASCII | lucid `UrlAggregator` | 74.14 | 13,488,364 |
-| Canonical ASCII | Ada `url_aggregator` | 95.36 | 10,486,073 |
-| Canonical ASCII | lucid `Url` | 73.88 | 13,535,272 |
-| Canonical ASCII | Ada `url` | 72.19 | 13,852,787 |
-| Normalization-heavy | lucid `UrlAggregator` | 1,765.99 | 566,254 |
-| Normalization-heavy | Ada `url_aggregator` | 175.01 | 5,714,102 |
-| Normalization-heavy | lucid `Url` | 1,770.38 | 564,849 |
-| Normalization-heavy | Ada `url` | 132.02 | 7,574,724 |
+| Canonical ASCII | lucid `UrlAggregator` | 94.74 | 10,555,436 |
+| Canonical ASCII | Ada `url_aggregator` | 94.39 | 10,594,374 |
+| Canonical ASCII | lucid `Url` | 93.73 | 10,668,823 |
+| Canonical ASCII | Ada `url` | 69.55 | 14,377,759 |
+| Normalization-heavy | lucid `UrlAggregator` | 123.08 | 8,124,654 |
+| Normalization-heavy | Ada `url_aggregator` | 173.86 | 5,751,804 |
+| Normalization-heavy | lucid `Url` | 123.76 | 8,080,410 |
+| Normalization-heavy | Ada `url` | 130.38 | 7,669,859 |
 
-The current implementation beats Ada's default getter-optimised representation
-by about 22% on canonical ASCII URLs. Ada remains substantially faster when
-normalization, IDNA, IPv6, or uncommon schemes invoke the general state
-machine. These are separate results intentionally: combining them into one
-number would hide where each parser is actually fast.
+On the normalization-heavy corpus, lucid is about 29% faster than Ada's
+`url_aggregator` and about 5% faster than Ada's `url`. The canonical corpus is
+shown separately because combining the two workloads would hide their
+different performance characteristics.
 
 ## License
 

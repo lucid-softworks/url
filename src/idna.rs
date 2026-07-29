@@ -420,6 +420,162 @@ fn punycode_encode(input: &[char]) -> Option<String> {
     Some(output)
 }
 
+/// Write a conservative, already-normalized left-to-right domain directly to
+/// `output`. Returns false without changing `output` when the full UTS-46 path
+/// is required.
+pub(crate) fn push_simple_domain_to_ascii(output: &mut String, domain: &str) -> bool {
+    let original_length = output.len();
+    if domain.is_empty() {
+        return false;
+    }
+
+    for (index, label) in domain.split('.').enumerate() {
+        if index > 0 {
+            output.push('.');
+        }
+        if label.is_empty() {
+            if index + 1 == domain.split('.').count() {
+                continue;
+            }
+            output.truncate(original_length);
+            return false;
+        }
+
+        let mut has_non_ascii = false;
+        for character in label.chars() {
+            if character.is_ascii() {
+                if !(character.is_ascii_alphanumeric() || matches!(character, '-' | '_')) {
+                    output.truncate(original_length);
+                    return false;
+                }
+                continue;
+            }
+            has_non_ascii = true;
+            let latin = matches!(character, '\u{00df}'..='\u{00f6}' | '\u{00f8}'..='\u{02af}');
+            if !latin
+                || is_mark(character)
+                || bidi_class(character) != 1
+                || !matches!(uts46_status(character), Status::Valid)
+            {
+                output.truncate(original_length);
+                return false;
+            }
+        }
+
+        if has_non_ascii {
+            if label.starts_with("xn--") {
+                output.truncate(original_length);
+                return false;
+            }
+            output.push_str("xn--");
+            if !punycode_encode_str_into(output, label) {
+                output.truncate(original_length);
+                return false;
+            }
+        } else {
+            for byte in label.bytes() {
+                output.push(char::from(byte.to_ascii_lowercase()));
+            }
+        }
+    }
+    true
+}
+
+fn punycode_encode_str_into(output: &mut String, input: &str) -> bool {
+    fn digit_to_basic(digit: u32) -> char {
+        if digit < 26 {
+            char::from(b'a' + digit as u8)
+        } else {
+            char::from(b'0' + (digit - 26) as u8)
+        }
+    }
+    let mapped = |character: char| {
+        if character.is_ascii_uppercase() {
+            character.to_ascii_lowercase() as u32
+        } else {
+            character as u32
+        }
+    };
+
+    let mut code_point = INITIAL_N;
+    let mut delta = 0u32;
+    let mut bias = INITIAL_BIAS;
+    let mut basics = 0u32;
+    let mut total = 0u32;
+    for character in input.chars() {
+        total += 1;
+        let value = mapped(character);
+        if value < 0x80 {
+            let Some(character) = char::from_u32(value) else {
+                return false;
+            };
+            output.push(character);
+            basics += 1;
+        }
+    }
+    if basics > 0 {
+        output.push('-');
+    }
+
+    let mut handled = basics;
+    while handled < total {
+        let Some(next) = input
+            .chars()
+            .map(mapped)
+            .filter(|&value| value >= code_point)
+            .min()
+        else {
+            return false;
+        };
+        let Some(increment) = (next - code_point).checked_mul(handled + 1) else {
+            return false;
+        };
+        let Some(next_delta) = delta.checked_add(increment) else {
+            return false;
+        };
+        delta = next_delta;
+        code_point = next;
+
+        for character in input.chars() {
+            let value = mapped(character);
+            if value < code_point {
+                let Some(next_delta) = delta.checked_add(1) else {
+                    return false;
+                };
+                delta = next_delta;
+            }
+            if value == code_point {
+                let mut quotient = delta;
+                let mut k = BASE;
+                loop {
+                    let threshold = if k <= bias {
+                        TMIN
+                    } else if k >= bias + TMAX {
+                        TMAX
+                    } else {
+                        k - bias
+                    };
+                    if quotient < threshold {
+                        break;
+                    }
+                    output.push(digit_to_basic(
+                        threshold + (quotient - threshold) % (BASE - threshold),
+                    ));
+                    quotient = (quotient - threshold) / (BASE - threshold);
+                    k += BASE;
+                }
+                output.push(digit_to_basic(quotient));
+                bias = adapt(delta, handled + 1, handled == basics);
+                delta = 0;
+                handled += 1;
+            }
+        }
+        delta += 1;
+        code_point += 1;
+    }
+    true
+}
+
 #[allow(dead_code)]
 pub(crate) fn punycode_decode(input: &str) -> Option<Vec<char>> {
     fn basic_to_digit(c: u8) -> Option<u32> {

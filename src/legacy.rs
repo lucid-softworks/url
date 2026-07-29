@@ -209,6 +209,10 @@ fn parse_host(input: &str, is_not_special: bool) -> Result<Host, ()> {
     Ok(Host::Domain(ascii))
 }
 
+pub(crate) fn normalize_special_host(input: &str) -> Result<String, ()> {
+    parse_host(input, false).map(|host| host.serialize())
+}
+
 fn parse_opaque_host(input: &str) -> Result<String, ()> {
     for c in input.chars() {
         if forbidden_host_code_point(c) && c != '%' {
