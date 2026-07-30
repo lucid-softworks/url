@@ -100,32 +100,42 @@ Results on an Apple M4 running macOS 26.5.2, Rust 1.97.0, and Apple Clang 21:
 
 | Corpus | Implementation | ns/URL | URLs/s |
 | --- | --- | ---: | ---: |
-| Canonical ASCII | lucid `UrlAggregator` | 57.39 | 17,424,025 |
-| Canonical ASCII | Ada `url_aggregator` | 90.48 | 11,051,891 |
-| Canonical ASCII | lucid `Url` | 55.70 | 17,952,303 |
-| Canonical ASCII | Ada `url` | 71.33 | 14,019,760 |
-| Normalization-heavy | lucid `UrlAggregator` | 101.74 | 9,828,899 |
-| Normalization-heavy | Ada `url_aggregator` | 171.74 | 5,822,726 |
-| Normalization-heavy | lucid `Url` | 100.56 | 9,943,961 |
-| Normalization-heavy | Ada `url` | 128.82 | 7,762,962 |
+| Canonical ASCII | lucid `UrlAggregator` | 55.37 | 18,060,205 |
+| Canonical ASCII | Ada `url_aggregator` | 90.06 | 11,103,140 |
+| Canonical ASCII | lucid `Url` | 55.16 | 18,127,717 |
+| Canonical ASCII | Ada `url` | 68.78 | 14,539,609 |
+| Normalization-heavy | lucid `UrlAggregator` | 101.31 | 9,870,648 |
+| Normalization-heavy | Ada `url_aggregator` | 169.82 | 5,888,483 |
+| Normalization-heavy | lucid `Url` | 102.44 | 9,761,850 |
+| Normalization-heavy | Ada `url` | 127.44 | 7,846,607 |
+
+Additional Lucid-specific regression corpora exercise internationalized domains
+and longer canonical inputs:
+
+| Corpus | Implementation | ns/URL | URLs/s |
+| --- | --- | ---: | ---: |
+| Unicode and IDNA | lucid `UrlAggregator` | 781.64 | 1,279,354 |
+| Unicode and IDNA | lucid `Url` | 779.97 | 1,282,101 |
+| Long canonical scans | lucid `UrlAggregator` | 59.44 | 16,824,240 |
+| Long canonical scans | lucid `Url` | 59.60 | 16,779,507 |
 
 The real-world corpora exercise parsing plus `get_href_size`, as well as the
 construction-free `can_parse` API:
 
 | Corpus | Implementation | ns/URL | URLs/s |
 | --- | --- | ---: | ---: |
-| Top sites | lucid `UrlAggregator` | 55.29 | 18,086,416 |
-| Top sites | Ada `url_aggregator` | 88.10 | 11,350,958 |
-| Top sites | lucid `Url` | 56.73 | 17,627,083 |
-| Top sites | Ada `url` | 88.14 | 11,344,956 |
-| Top sites | lucid `can_parse` | 13.12 | 76,192,874 |
-| Top sites | Ada `can_parse` | 50.07 | 19,973,953 |
-| 100,025 URLs | lucid `UrlAggregator` | 57.77 | 17,310,493 |
-| 100,025 URLs | Ada `url_aggregator` | 84.76 | 11,798,569 |
-| 100,025 URLs | lucid `Url` | 57.72 | 17,325,112 |
-| 100,025 URLs | Ada `url` | 96.79 | 10,331,350 |
-| 100,025 URLs | lucid `can_parse` | 11.02 | 90,762,733 |
-| 100,025 URLs | Ada `can_parse` | 35.21 | 28,404,000 |
+| Top sites | lucid `UrlAggregator` | 55.77 | 17,929,349 |
+| Top sites | Ada `url_aggregator` | 88.51 | 11,297,710 |
+| Top sites | lucid `Url` | 56.00 | 17,858,094 |
+| Top sites | Ada `url` | 87.55 | 11,422,233 |
+| Top sites | lucid `can_parse` | 13.18 | 75,865,062 |
+| Top sites | Ada `can_parse` | 49.54 | 20,187,468 |
+| 100,025 URLs | lucid `UrlAggregator` | 56.62 | 17,662,483 |
+| 100,025 URLs | Ada `url_aggregator` | 84.08 | 11,892,930 |
+| 100,025 URLs | lucid `Url` | 56.28 | 17,768,113 |
+| 100,025 URLs | Ada `url` | 95.33 | 10,490,154 |
+| 100,025 URLs | lucid `can_parse` | 9.47 | 105,582,000 |
+| 100,025 URLs | Ada `can_parse` | 34.65 | 28,857,454 |
 
 Lucid is faster in every measured operation across the focused, top-sites,
 and 100,025-URL corpora. The corpora remain separate so a combined number
@@ -147,9 +157,9 @@ repetitions. Results from the same Apple M4 system:
 
 | Operation | Lucid ns/URL | Ada ns/URL | Lucid speedup |
 | --- | ---: | ---: | ---: |
-| `Url` parse + href | 78.93 | 131.38 | 1.66× |
-| `UrlAggregator` parse + href | 56.96 | 83.50 | 1.47× |
-| `can_parse` | 10.15 | 33.89 | 3.34× |
+| `Url` parse + href | 76.33 | 132.31 | 1.73× |
+| `UrlAggregator` parse + href | 57.31 | 82.33 | 1.44× |
+| `can_parse` | 9.05 | 34.74 | 3.84× |
 
 Ada accepts three malformed doubled-scheme inputs in the corpus that Lucid
 rejects. The runner reports every disagreement; they account for 0.003% of the
@@ -164,13 +174,13 @@ objects:
 
 | Release object | Lucid | Ada |
 | --- | ---: | ---: |
-| Native object sections | 449.8 KiB | 318.4 KiB |
-| Machine-code `__text` | 92.9 KiB | 226.9 KiB |
+| Native object sections | 462.1 KiB | 318.4 KiB |
+| Machine-code `__text` | 92.3 KiB | 226.9 KiB |
 
-Lucid's complete native object is 41% larger, while its machine code is 59%
+Lucid's complete native object is 45% larger, while its machine code is 59%
 smaller. Most of Lucid's remaining footprint is its dependency-free Unicode and
 IDNA data. Raw compiler archives are not comparable: Rust's `.rlib` also
-contains 1.48 MiB of compiler metadata and LLVM input used for downstream
+contains 1.52 MiB of compiler metadata and LLVM input used for downstream
 generic compilation and LTO, while Ada's `.a` is a conventional native archive.
 
 ## License
