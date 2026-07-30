@@ -68,7 +68,7 @@ ordinary `cargo test`; missing or malformed fixtures are hard failures.
 
 - URL parsing, serialization, getters, and `can_parse`: 919 cases
 - URL setters: 296 cases
-- `IdnaTestV2` through the host parser: 2671 cases
+- `IdnaTestV2` through the host parser: 2670 representable cases
 - Ada ToASCII success cases: 68 cases
 - percent encoding: 7 cases
 - DNS/domain-length validation: 17 cases
@@ -122,69 +122,30 @@ For Lucid-only development regressions, without making a comparison claim:
 cargo bench --bench parse
 ```
 
-Results on an Apple M4 running macOS 26.5.2, Rust 1.97.0, and Apple Clang 21:
-
-| Corpus | Implementation | ns/URL | URLs/s |
-| --- | --- | ---: | ---: |
-| Canonical ASCII | lucid `UrlAggregator` | 55.37 | 18,060,205 |
-| Canonical ASCII | Ada `url_aggregator` | 90.06 | 11,103,140 |
-| Canonical ASCII | lucid `Url` | 55.16 | 18,127,717 |
-| Canonical ASCII | Ada `url` | 68.78 | 14,539,609 |
-| Normalization-heavy | lucid `UrlAggregator` | 101.31 | 9,870,648 |
-| Normalization-heavy | Ada `url_aggregator` | 169.82 | 5,888,483 |
-| Normalization-heavy | lucid `Url` | 102.44 | 9,761,850 |
-| Normalization-heavy | Ada `url` | 127.44 | 7,846,607 |
-
-Additional Lucid-specific regression corpora exercise internationalized domains
-and longer canonical inputs:
-
-| Corpus | Implementation | ns/URL | URLs/s |
-| --- | --- | ---: | ---: |
-| Unicode and IDNA | lucid `UrlAggregator` | 781.64 | 1,279,354 |
-| Unicode and IDNA | lucid `Url` | 779.97 | 1,282,101 |
-| Long canonical scans | lucid `UrlAggregator` | 59.44 | 16,824,240 |
-| Long canonical scans | lucid `Url` | 59.60 | 16,779,507 |
-
-The real-world corpora exercise parsing plus `get_href_size`, as well as the
-construction-free `can_parse` API:
-
-| Corpus | Implementation | ns/URL | URLs/s |
-| --- | --- | ---: | ---: |
-| Top sites | lucid `UrlAggregator` | 55.77 | 17,929,349 |
-| Top sites | Ada `url_aggregator` | 88.51 | 11,297,710 |
-| Top sites | lucid `Url` | 56.00 | 17,858,094 |
-| Top sites | Ada `url` | 87.55 | 11,422,233 |
-| Top sites | lucid `can_parse` | 13.18 | 75,865,062 |
-| Top sites | Ada `can_parse` | 49.54 | 20,187,468 |
-| 100,025 URLs | lucid `UrlAggregator` | 56.62 | 17,662,483 |
-| 100,025 URLs | Ada `url_aggregator` | 84.08 | 11,892,930 |
-| 100,025 URLs | lucid `Url` | 56.28 | 17,768,113 |
-| 100,025 URLs | Ada `url` | 95.33 | 10,490,154 |
-| 100,025 URLs | lucid `can_parse` | 9.47 | 105,582,000 |
-| 100,025 URLs | Ada `can_parse` | 34.65 | 28,857,454 |
-
-Lucid is faster in every measured operation across the focused, top-sites,
-and 100,025-URL corpora. The corpora remain separate so a combined number
-cannot hide workload-specific behavior.
+These microbenchmarks exercise focused canonical, normalization, Unicode,
+IDNA, and long-input paths. They are regression aids rather than published
+Ada comparisons.
 
 ### Official Ada benchmark protocol
 
 The default benchmark uses the Google Benchmark protocol from the
 [Ada v4 release benchmark](https://www.yagiz.co/release-of-ada-v4). It runs
 the official parse-plus-href and `can_parse` operations and reports the mean
-of five repetitions. `./benchmarks/compare-ada-official.sh` remains as a
-backwards-compatible alias. Results from the same Apple M4 system:
+of five repetitions. It also refuses to run if the parsers disagree about
+which corpus inputs are valid or how any accepted input is serialized.
+
+Results from `./benchmarks/run.sh` on an Apple M4 running macOS 26.5, Rust
+1.97.0, and Apple Clang 21:
 
 | Operation | Lucid ns/URL | Ada ns/URL | Lucid speedup |
 | --- | ---: | ---: | ---: |
-| `Url` parse + href | 76.33 | 132.31 | 1.73× |
-| `UrlAggregator` parse + href | 57.31 | 82.33 | 1.44× |
-| `can_parse` | 9.05 | 34.74 | 3.84× |
+| `Url` parse + href | 81.61 | 142.29 | 1.74× |
+| `UrlAggregator` parse + href | 57.57 | 88.29 | 1.53× |
+| `can_parse` | 9.26 | 36.60 | 3.95× |
 
-Ada accepts three malformed doubled-scheme inputs in the corpus that Lucid
-rejects. The runner reports every disagreement; they account for 0.003% of the
-100,025 URLs. The `Url` benchmark forces the owned href through an optimization
-barrier so Rust cannot replace materialization with a length lookup.
+Both parsers accept, reject, and serialize the same inputs in this 100,025-URL
+run. The `Url` benchmark forces the owned href through an optimization barrier
+so Rust cannot replace materialization with a length lookup.
 
 ### Release artifact size
 

@@ -334,6 +334,11 @@ fn run_to_ascii_cases<T: TestUrl>(fixture_name: &str, assert_rejections: bool) {
         };
         let input = case["input"].as_str().unwrap();
         let expected = case.get("output").and_then(Value::as_str);
+        // An empty host cannot be isolated with this URL-wrapper adaptation:
+        // `https:///x` reparses `x` as the host in both Ada and WHATWG.
+        if input.is_empty() && expected == Some("") {
+            continue;
+        }
         let parsed = T::parse(&format!("https://{input}/x"));
         match expected {
             Some(expected) if !expected.is_empty() => {

@@ -736,6 +736,9 @@ impl UrlAggregator {
 
         let host_end = cursor;
         if host_end == authority_start {
+            if matches!(bytes.get(authority_start), Some(b'/' | b'\\')) {
+                return None;
+            }
             return Some(FastHttpScan::Parsed(Err(Error::TypeError)));
         }
         let last = bytes[host_end - 1];
@@ -859,6 +862,9 @@ impl UrlAggregator {
             .position(|&byte| matches!(byte, b'/' | b'?' | b'#'))
             .map_or(bytes.len(), |offset| authority_start + offset);
         if suffix_start == authority_start {
+            if matches!(bytes.get(authority_start), Some(b'/' | b'\\')) {
+                return None;
+            }
             return Some(Err(Error::TypeError));
         }
 
@@ -934,7 +940,7 @@ impl UrlAggregator {
         let port = if port_colon.is_some() {
             let port_input = &input[host_end + 1..suffix_start];
             let Ok(port) = port_input.parse::<u16>() else {
-                return Some(Err(Error::TypeError));
+                return None;
             };
             if port == default_port {
                 return None;
@@ -1087,10 +1093,10 @@ impl UrlAggregator {
             return Err(Error::TypeError);
         }
         authority_start += 2;
-        if !is_file && matches!(bytes.get(authority_start), Some(b'/' | b'\\')) {
-            return legacy::Url::parse(input)
-                .map_err(|()| Error::TypeError)
-                .and_then(|record| Self::from_record(&record));
+        if !is_file {
+            while matches!(bytes.get(authority_start), Some(b'/' | b'\\')) {
+                authority_start += 1;
+            }
         }
 
         let authority_end = authority_end.unwrap_or_else(|| {
@@ -2744,6 +2750,30 @@ mod tests {
             Err(Error::TypeError)
         );
         assert!(!can_parse("not a url", None));
+    }
+
+    #[test]
+    fn accepts_empty_ports_and_extra_authority_slashes() {
+        let cases = [
+            (
+                "https://tv.youtube.comhttps://www.pcmag.com/reviews/youtube-tv",
+                "https://tv.youtube.comhttps//www.pcmag.com/reviews/youtube-tv",
+            ),
+            (
+                "https://http://www.solutionsitw.com/",
+                "https://http//www.solutionsitw.com/",
+            ),
+            (
+                "http:////www.youtube.com/channel/UC415Ud_w-d_0bciQ_-4RG8A",
+                "http://www.youtube.com/channel/UC415Ud_w-d_0bciQ_-4RG8A",
+            ),
+        ];
+
+        for (input, expected) in cases {
+            let url = parse::<UrlAggregator>(input, None)
+                .unwrap_or_else(|error| panic!("{input}: {error:?}"));
+            assert_eq!(url.get_href(), expected);
+        }
     }
 
     #[test]

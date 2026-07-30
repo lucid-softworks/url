@@ -8,7 +8,7 @@ Covered:
 
 - URL parsing, relative resolution, serialization, getters, and `can_parse`
 - every standard and Ada-specific URL setter fixture
-- UTS-46/IDNA and Ada's additional ToASCII cases
+- 2670 representable UTS-46/IDNA cases and Ada's additional ToASCII successes
 - percent encoding through URL parsing and setters
 - valid-domain/DNS-length cases
 - Ada-compatible maximum-input-length and `href_from_file` behavior in the
@@ -29,3 +29,8 @@ Not applicable to this crate:
 The exclusions are about absent interfaces, not unsupported parser cases. Any
 new applicable fixture added to Ada's `tests/wpt` suite should be added to the
 pinned set and made mandatory here.
+
+The empty-host `IdnaTestV2` case cannot be isolated through the URL-wrapper
+adaptation: `https:///x` correctly reparses `x` as the host in both Ada and
+WHATWG. Testing that case directly would require Ada's standalone Unicode API,
+which this crate does not expose.
