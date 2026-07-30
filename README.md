@@ -131,6 +131,48 @@ Lucid is faster in every measured operation across the focused, top-sites,
 and 100,025-URL corpora. The corpora remain separate so a combined number
 cannot hide workload-specific behavior.
 
+### Official Ada benchmark protocol
+
+The repository can also run both libraries through the Google Benchmark
+protocol used for the [Ada v4 release
+benchmark](https://www.yagiz.co/release-of-ada-v4):
+
+```sh
+./benchmarks/compare-ada-official.sh
+```
+
+This pins Ada and its dataset to the commits above, runs the official
+parse-plus-href and `can_parse` operations, and reports the mean of five
+repetitions. Results from the same Apple M4 system:
+
+| Operation | Lucid ns/URL | Ada ns/URL | Lucid speedup |
+| --- | ---: | ---: | ---: |
+| `Url` parse + href | 78.93 | 131.38 | 1.66× |
+| `UrlAggregator` parse + href | 56.96 | 83.50 | 1.47× |
+| `can_parse` | 10.15 | 33.89 | 3.34× |
+
+Ada accepts three malformed doubled-scheme inputs in the corpus that Lucid
+rejects. The runner reports every disagreement; they account for 0.003% of the
+100,025 URLs. The `Url` benchmark forces the owned href through an optimization
+barrier so Rust cannot replace materialization with a length lookup.
+
+### Release artifact size
+
+For a native-code comparison, both libraries were built at optimization level
+3 without LTO so the Apple Mach-O `size` tool could inspect their complete
+objects:
+
+| Release object | Lucid | Ada |
+| --- | ---: | ---: |
+| Native object sections | 449.8 KiB | 318.4 KiB |
+| Machine-code `__text` | 92.9 KiB | 226.9 KiB |
+
+Lucid's complete native object is 41% larger, while its machine code is 59%
+smaller. Most of Lucid's remaining footprint is its dependency-free Unicode and
+IDNA data. Raw compiler archives are not comparable: Rust's `.rlib` also
+contains 1.48 MiB of compiler metadata and LLVM input used for downstream
+generic compilation and LTO, while Ada's `.a` is a conventional native archive.
+
 ## License
 
 MIT

@@ -1,0 +1,18 @@
+[package]
+name = "lucid-url-official-benchmark-bridge"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+lucid-url = { path = "../.." }
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
