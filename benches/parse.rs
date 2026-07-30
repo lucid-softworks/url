@@ -82,10 +82,12 @@ fn measure(urls: &[&str], mut operation: impl FnMut(&str) -> usize) -> (f64, f64
 
 fn run(name: &str, urls: &[&str]) {
     let (aggregate_ns, aggregate_rate, aggregate_sum) = measure(urls, |input| {
-        parse::<UrlAggregator>(input, None).unwrap().get_href_size()
+        let url = parse::<UrlAggregator>(input, None).unwrap();
+        black_box(url.get_href()).len()
     });
     let (url_ns, url_rate, url_sum) = measure(urls, |input| {
-        parse::<Url>(input, None).unwrap().get_href_size()
+        let url = parse::<Url>(input, None).unwrap();
+        black_box(url.get_href()).len()
     });
 
     black_box((aggregate_sum, url_sum));

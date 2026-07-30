@@ -12,6 +12,10 @@
 #include <string_view>
 #include <vector>
 
+#if defined(LUCID_URL_AMALGAMATE_ADA)
+#include LUCID_URL_ADA_AMALGAMATION
+#endif
+
 namespace {
 constexpr std::array<std::string_view, 11> top_sites = {
     "https://www.google.com/webhp?hl=en&amp;ictx=2&amp;sa=X&amp;ved=0ahUKEwil_oSxzJj8AhVtEFkFHTHnCGQQPQgI",
@@ -32,13 +36,15 @@ double sample(const auto& inputs, Operation operation, std::size_t& checksum) {
   using clock = std::chrono::steady_clock;
   std::size_t iterations = 1;
   for (;;) {
+    volatile std::size_t sink = 0;
     const auto start = clock::now();
     for (std::size_t iteration = 0; iteration < iterations; ++iteration) {
       for (const auto& input : inputs) {
-        checksum += operation(std::string_view(input));
+        sink = sink + operation(std::string_view(input));
       }
     }
     const auto elapsed = clock::now() - start;
+    checksum ^= static_cast<std::size_t>(sink);
     if (elapsed >= std::chrono::milliseconds(300)) {
       const auto nanoseconds =
           std::chrono::duration<double, std::nano>(elapsed).count();
@@ -67,11 +73,17 @@ std::pair<double, double> measure(const auto& inputs, Operation operation) {
 void print(const std::string_view name, const auto& inputs) {
   const auto [aggregate_ns, aggregate_rate] = measure(inputs, [](auto input) {
     auto parsed = ada::parse<ada::url_aggregator>(input);
-    return parsed ? parsed->get_href_size() : 0;
+    if (!parsed) {
+      return std::size_t{0};
+    }
+    return parsed->get_href().size();
   });
   const auto [url_ns, url_rate] = measure(inputs, [](auto input) {
     auto parsed = ada::parse<ada::url>(input);
-    return parsed ? parsed->get_href_size() : 0;
+    if (!parsed) {
+      return std::size_t{0};
+    }
+    return parsed->get_href().size();
   });
   const auto [can_parse_ns, can_parse_rate] =
       measure(inputs, [](auto input) { return std::size_t(ada::can_parse(input)); });

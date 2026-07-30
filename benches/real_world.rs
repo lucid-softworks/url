@@ -63,14 +63,14 @@ fn run(name: &str, urls: &[&str]) {
         .is_none_or(|value| value == "aggregate")
     {
         let (nanoseconds, rate, checksum) = measure(urls, |input| {
-            parse::<UrlAggregator>(input, None).map_or(0, |url| url.get_href_size())
+            parse::<UrlAggregator>(input, None).map_or(0, |url| black_box(url.get_href()).len())
         });
         black_box(checksum);
         println!("lucid UrlAggregator    {nanoseconds:10.2}  {rate:12.0}");
     }
     if operation.as_deref().is_none_or(|value| value == "url") {
         let (nanoseconds, rate, checksum) = measure(urls, |input| {
-            parse::<Url>(input, None).map_or(0, |url| url.get_href_size())
+            parse::<Url>(input, None).map_or(0, |url| black_box(url.get_href()).len())
         });
         black_box(checksum);
         println!("lucid Url              {nanoseconds:10.2}  {rate:12.0}");
