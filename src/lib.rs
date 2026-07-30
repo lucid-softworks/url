@@ -192,7 +192,15 @@ pub fn can_parse(input: &str, base: Option<&str>) -> bool {
     if input.len() > limit as usize {
         return false;
     }
-    if base.is_none() && limit == u32::MAX {
+    if limit != u32::MAX {
+        return match base {
+            None => UrlAggregator::parse(input).is_ok(),
+            Some(base) => UrlAggregator::parse(base)
+                .and_then(|base| UrlAggregator::parse_with_base(input, &base))
+                .is_ok(),
+        };
+    }
+    if base.is_none() {
         if let Some(result) = try_can_parse_clean_http(input) {
             return result;
         }
@@ -412,10 +420,10 @@ pub fn href_from_file(path: &str) -> String {
     for character in path.chars() {
         match character {
             '\\' => result.push('/'),
+            '\t' | '\n' | '\r' => {}
             ' ' => result.push_str("%20"),
             '#' => result.push_str("%23"),
             '?' => result.push_str("%3F"),
-            '%' => result.push_str("%25"),
             character => result.push(character),
         }
     }
@@ -728,6 +736,9 @@ impl UrlAggregator {
 
         let host_end = cursor;
         if host_end == authority_start {
+            if matches!(bytes.get(authority_start), Some(b'/' | b'\\')) {
+                return None;
+            }
             return Some(FastHttpScan::Parsed(Err(Error::TypeError)));
         }
         let last = bytes[host_end - 1];
@@ -851,6 +862,9 @@ impl UrlAggregator {
             .position(|&byte| matches!(byte, b'/' | b'?' | b'#'))
             .map_or(bytes.len(), |offset| authority_start + offset);
         if suffix_start == authority_start {
+            if matches!(bytes.get(authority_start), Some(b'/' | b'\\')) {
+                return None;
+            }
             return Some(Err(Error::TypeError));
         }
 
@@ -926,7 +940,7 @@ impl UrlAggregator {
         let port = if port_colon.is_some() {
             let port_input = &input[host_end + 1..suffix_start];
             let Ok(port) = port_input.parse::<u16>() else {
-                return Some(Err(Error::TypeError));
+                return None;
             };
             if port == default_port {
                 return None;
@@ -1079,10 +1093,10 @@ impl UrlAggregator {
             return Err(Error::TypeError);
         }
         authority_start += 2;
-        if !is_file && matches!(bytes.get(authority_start), Some(b'/' | b'\\')) {
-            return legacy::Url::parse(input)
-                .map_err(|()| Error::TypeError)
-                .and_then(|record| Self::from_record(&record));
+        if !is_file {
+            while matches!(bytes.get(authority_start), Some(b'/' | b'\\')) {
+                authority_start += 1;
+            }
         }
 
         let authority_end = authority_end.unwrap_or_else(|| {
@@ -1507,8 +1521,16 @@ impl UrlAggregator {
                 origin.push_str(self.get_host());
                 origin
             }
-            "blob:" => legacy::Url::parse(self.get_pathname())
-                .map_or_else(|()| "null".to_owned(), |url| url.origin()),
+            "blob:" => legacy::Url::parse(self.get_pathname()).map_or_else(
+                |()| "null".to_owned(),
+                |url| {
+                    if matches!(url.scheme(), "http" | "https" | "file") {
+                        url.origin()
+                    } else {
+                        "null".to_owned()
+                    }
+                },
+            ),
             _ => "null".to_owned(),
         }
     }
@@ -2372,9 +2394,11 @@ fn valid_domain(hostname: &str) -> bool {
     if hostname.starts_with('[') {
         return true;
     }
-    hostname.len() <= 255
-        && hostname
-            .trim_end_matches('.')
+    let (domain, maximum_length) = hostname
+        .strip_suffix('.')
+        .map_or((hostname, 253), |domain| (domain, 254));
+    hostname.len() <= maximum_length
+        && domain
             .split('.')
             .all(|label| !label.is_empty() && label.len() <= 63)
 }
@@ -2726,6 +2750,30 @@ mod tests {
             Err(Error::TypeError)
         );
         assert!(!can_parse("not a url", None));
+    }
+
+    #[test]
+    fn accepts_empty_ports_and_extra_authority_slashes() {
+        let cases = [
+            (
+                "https://tv.youtube.comhttps://www.pcmag.com/reviews/youtube-tv",
+                "https://tv.youtube.comhttps//www.pcmag.com/reviews/youtube-tv",
+            ),
+            (
+                "https://http://www.solutionsitw.com/",
+                "https://http//www.solutionsitw.com/",
+            ),
+            (
+                "http:////www.youtube.com/channel/UC415Ud_w-d_0bciQ_-4RG8A",
+                "http://www.youtube.com/channel/UC415Ud_w-d_0bciQ_-4RG8A",
+            ),
+        ];
+
+        for (input, expected) in cases {
+            let url = parse::<UrlAggregator>(input, None)
+                .unwrap_or_else(|error| panic!("{input}: {error:?}"));
+            assert_eq!(url.get_href(), expected);
+        }
     }
 
     #[test]

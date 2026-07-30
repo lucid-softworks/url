@@ -9,7 +9,6 @@ repository = "https://github.com/lucid-softworks/url"
 keywords = ["url", "whatwg", "parser", "ada", "web"]
 categories = ["parser-implementations", "web-programming"]
 exclude = [
-    "benchmarks/compare-ada-official.sh",
     "benchmarks/official_compare.cpp",
 ]
 
@@ -27,6 +26,7 @@ harness = false
 [dependencies]
 
 [dev-dependencies]
+serde_json = "1.0"
 
 [profile.release]
 opt-level = 3

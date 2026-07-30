@@ -14,6 +14,12 @@
 #ifndef LUCID_URL_DATASET
 #error "LUCID_URL_DATASET must identify the pinned Ada URL corpus"
 #endif
+#ifndef LUCID_URL_ADA_COMMIT
+#error "LUCID_URL_ADA_COMMIT must identify the Ada revision"
+#endif
+#ifndef LUCID_URL_DATASET_COMMIT
+#error "LUCID_URL_DATASET_COMMIT must identify the dataset revision"
+#endif
 
 extern "C" {
 std::size_t lucid_bench_initialize(const unsigned char *path,
@@ -23,6 +29,8 @@ std::size_t lucid_bench_url_aggregator();
 std::size_t lucid_bench_can_parse();
 std::size_t lucid_bench_count_invalid();
 bool lucid_bench_is_valid(std::size_t index);
+std::size_t lucid_bench_write_href(std::size_t index, unsigned char *output,
+                                   std::size_t capacity);
 }
 
 namespace {
@@ -139,9 +147,11 @@ int main(int argc, char **argv) {
 
   std::size_t ada_invalid = 0;
   std::size_t disagreements = 0;
+  std::size_t serialization_disagreements = 0;
   for (std::size_t index = 0; index < url_examples.size(); index++) {
-    const auto ada_valid =
-        bool(ada::parse<ada::url_aggregator>(url_examples[index]));
+    const auto ada_result =
+        ada::parse<ada::url_aggregator>(url_examples[index]);
+    const auto ada_valid = bool(ada_result);
     const auto lucid_valid = lucid_bench_is_valid(index);
     if (!ada_valid) {
       ada_invalid++;
@@ -152,13 +162,24 @@ int main(int argc, char **argv) {
                 << ada_valid << ", Lucid " << lucid_valid << ": "
                 << url_examples[index] << '\n';
     }
+    if (ada_valid && lucid_valid) {
+      const auto lucid_size = lucid_bench_write_href(index, nullptr, 0);
+      std::string lucid_href(lucid_size, '\0');
+      lucid_bench_write_href(
+          index, reinterpret_cast<unsigned char *>(lucid_href.data()),
+          lucid_href.size());
+      if (ada_result->get_href() != lucid_href) {
+        serialization_disagreements++;
+        std::cerr << "serialization mismatch at corpus index " << index
+                  << ": Ada " << ada_result->get_href() << ", Lucid "
+                  << lucid_href << ": " << url_examples[index] << '\n';
+      }
+    }
   }
   const auto lucid_invalid = lucid_bench_count_invalid();
 
-  benchmark::AddCustomContext("Ada commit",
-                              "16a5772360d4b901fc3b35ee1ee6947782ab9491");
-  benchmark::AddCustomContext("dataset commit",
-                              "9749b92c13e970e70409948fa862461191504ccc");
+  benchmark::AddCustomContext("Ada commit", LUCID_URL_ADA_COMMIT);
+  benchmark::AddCustomContext("dataset commit", LUCID_URL_DATASET_COMMIT);
   benchmark::AddCustomContext("number of URLs",
                               std::to_string(url_examples.size()));
   benchmark::AddCustomContext("Ada invalid URLs", std::to_string(ada_invalid));
@@ -166,6 +187,12 @@ int main(int argc, char **argv) {
                               std::to_string(lucid_invalid));
   benchmark::AddCustomContext("validity disagreements",
                               std::to_string(disagreements));
+  benchmark::AddCustomContext("serialization disagreements",
+                              std::to_string(serialization_disagreements));
+  if (disagreements != 0 || serialization_disagreements != 0) {
+    std::cerr << "refusing to benchmark different parser results\n";
+    return 3;
+  }
   benchmark::Initialize(&argc, argv);
   benchmark::RunSpecifiedBenchmarks();
   benchmark::Shutdown();

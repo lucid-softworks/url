@@ -1,4 +1,5 @@
 use std::fs;
+use std::ptr;
 use std::slice;
 use std::str;
 use std::sync::OnceLock;
@@ -98,4 +99,35 @@ pub extern "C" fn lucid_bench_is_valid(index: usize) -> bool {
     urls()
         .get(index)
         .is_some_and(|input| parse::<UrlAggregator>(input, None).is_ok())
+}
+
+/// Serialize a parsed corpus URL into a caller-owned buffer.
+///
+/// Returns `usize::MAX` when the URL is invalid. Otherwise, returns the
+/// required byte length and writes the href when the supplied buffer is large
+/// enough.
+///
+/// # Safety
+///
+/// When `output` is non-null and `capacity` is at least the returned length,
+/// it must point to `capacity` writable bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lucid_bench_write_href(
+    index: usize,
+    output: *mut u8,
+    capacity: usize,
+) -> usize {
+    let Some(input) = urls().get(index) else {
+        return usize::MAX;
+    };
+    let Ok(url) = parse::<UrlAggregator>(input, None) else {
+        return usize::MAX;
+    };
+    let href = url.get_href().as_bytes();
+    if !output.is_null() && capacity >= href.len() {
+        unsafe {
+            ptr::copy_nonoverlapping(href.as_ptr(), output, href.len());
+        }
+    }
+    href.len()
 }
