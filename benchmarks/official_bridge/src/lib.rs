@@ -69,7 +69,8 @@ pub extern "C" fn lucid_bench_url_aggregator() -> usize {
     for input in urls() {
         if let Ok(url) = parse::<UrlAggregator>(input, None) {
             volatile_add(&mut success, 1);
-            volatile_add(&mut href_size, url.get_href().len());
+            let href = std::hint::black_box(url.get_href());
+            volatile_add(&mut href_size, href.len());
         }
     }
     success.wrapping_add(href_size)

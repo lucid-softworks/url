@@ -109,12 +109,20 @@ The comparison fetches Ada's 100,025-URL dataset at commit
 [Ada v4 release benchmark](https://www.yagiz.co/release-of-ada-v4) commit,
 `16a5772360d4b901fc3b35ee1ee6947782ab9491`.
 
-Ada's optional simdutf path is off by default, matching Ada's default build.
-It can be measured explicitly with:
+Both parsers are built with peak local throughput defaults:
+
+- Ada: `Release`, `ADA_USE_SIMDUTF=OFF`, `-O3`, native CPU, amalgamated into
+  the harness TU (not linked as `libada.a`)
+- Lucid: `opt-level=3`, `codegen-units=1`, `target-cpu=native`
+- LTO matched on both sides: off on macOS (Apple Clang linker abort), on for
+  Linux. See the note in `Cargo.toml`.
 
 ```sh
 ADA_USE_SIMDUTF=ON ./benchmarks/run.sh
+ADA_ENABLE_LTO=OFF ./benchmarks/run.sh
 ```
+
+Override Ada/C++ flags wholesale with `ADA_CXX_FLAGS` (space-separated).
 
 For Lucid-only development regressions, without making a comparison claim:
 
@@ -134,18 +142,33 @@ the official parse-plus-href and `can_parse` operations and reports the mean
 of five repetitions. It also refuses to run if the parsers disagree about
 which corpus inputs are valid or how any accepted input is serialized.
 
-Results from `./benchmarks/run.sh` on an Apple M4 running macOS 26.5, Rust
-1.97.0, and Apple Clang 21:
+Results from `./benchmarks/compare-ada.sh` on an Apple M4 running macOS 26.5
+(matched no-LTO builds, Ada amalgamated into the harness, `ADA_USE_SIMDUTF=OFF`):
 
-| Operation | Lucid ns/URL | Ada ns/URL | Lucid speedup |
-| --- | ---: | ---: | ---: |
-| `Url` parse + href | 81.61 | 142.29 | 1.74× |
-| `UrlAggregator` parse + href | 57.57 | 88.29 | 1.53× |
-| `can_parse` | 9.26 | 36.60 | 3.95× |
+#### Microbenchmarks
 
-Both parsers accept, reject, and serialize the same inputs in this 100,025-URL
-run. The `Url` benchmark forces the owned href through an optimization barrier
-so Rust cannot replace materialization with a length lookup.
+| Workload | Lucid `UrlAggregator` | Lucid `Url` | Ada `url_aggregator` | Ada `url` |
+| --- | ---: | ---: | ---: | ---: |
+| Canonical ASCII | 48.08 | 67.55 | 78.43 | 88.63 |
+| Normalization-heavy | 96.66 | 109.18 | 148.00 | 144.66 |
+| Unicode and IDNA | 719.78 | 727.39 | 397.80 | 476.25 |
+| Long canonical scans | 52.91 | 71.44 | 114.44 | 185.26 |
+
+Values are ns/URL.
+
+#### Real-world corpora
+
+| Corpus | Operation | Lucid ns/URL | Ada ns/URL | Lucid speedup |
+| --- | --- | ---: | ---: | ---: |
+| Top sites (11) | `UrlAggregator` | 55.26 | 85.14 | 1.54× |
+| Top sites (11) | `Url` | 71.14 | 110.14 | 1.55× |
+| Top sites (11) | `can_parse` | 15.16 | 42.03 | 2.77× |
+| Benchdata (100,025) | `UrlAggregator` | 52.93 | 87.27 | 1.65× |
+| Benchdata (100,025) | `Url` | 77.08 | 120.58 | 1.56× |
+| Benchdata (100,025) | `can_parse` | 10.95 | 30.91 | 2.82× |
+
+The `Url` path materializes an owned href (matching Ada's `get_href()` protocol)
+so the compiler cannot replace it with a length lookup.
 
 ### Release artifact size
 

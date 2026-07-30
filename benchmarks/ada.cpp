@@ -9,6 +9,10 @@
 #include <iostream>
 #include <string_view>
 
+#if defined(LUCID_URL_AMALGAMATE_ADA)
+#include LUCID_URL_ADA_AMALGAMATION
+#endif
+
 namespace {
 constexpr std::array<std::string_view, 8> canonical = {
     "https://example.com/",
@@ -32,24 +36,44 @@ constexpr std::array<std::string_view, 8> normalization_heavy = {
     "https://user name:pass word@example.com/",
 };
 
+constexpr std::array<std::string_view, 9> unicode_idna = {
+    "https://bücher.example/straße",
+    "https://mañana.example/café",
+    "https://例え.テスト/パス",
+    "https://παράδειγμα.δοκιμή/",
+    "https://مثال.إختبار/",
+    "https://उदाहरण.भारत/",
+    "https://한국어.example/",
+    "https://cafe\u0301.example/résumé",
+    "https://ＥＸＡＭＰＬＥ.com/",
+};
+
+constexpr std::array<std::string_view, 3> long_scans = {
+    "https://assets.example.com/packages/catalogue/components/react/dialog-manager/examples/controlled-dialog/source/index.tsx?framework=react&bundler=vite&render=client&theme=system#interactive-example",
+    "https://api.example.com/v1/organizations/lucid-softworks/repositories/url/commits/306db12a15e0d5ed3428934622a187b720ae5741/check-runs?filter=latest&per_page=100",
+    "https://cdn.example.com/assets/0123456789abcdefghijklmnopqrstuvwxyz/0123456789abcdefghijklmnopqrstuvwxyz/0123456789abcdefghijklmnopqrstuvwxyz/module.min.js?cache=0123456789abcdefghijklmnopqrstuvwxyz",
+};
+
 template <typename Url>
 double sample(const auto& inputs, std::size_t& checksum) {
   using clock = std::chrono::steady_clock;
   std::size_t iterations = 1;
   for (;;) {
+    volatile std::size_t success = 0;
+    volatile std::size_t href_size = 0;
     const auto start = clock::now();
     for (std::size_t iteration = 0; iteration < iterations; ++iteration) {
-      std::size_t batch = 0;
       for (const auto input : inputs) {
         auto parsed = ada::parse<Url>(input);
         if (!parsed) {
           std::terminate();
         }
-        batch += parsed->get_href_size();
+        success = success + 1;
+        href_size = href_size + parsed->get_href().size();
       }
-      checksum ^= batch;
     }
     const auto elapsed = clock::now() - start;
+    checksum ^= static_cast<std::size_t>(success) ^ static_cast<std::size_t>(href_size);
     if (elapsed >= std::chrono::milliseconds(300)) {
       const auto nanoseconds =
           std::chrono::duration<double, std::nano>(elapsed).count();
@@ -94,4 +118,6 @@ void print(const std::string_view name, const auto& inputs) {
 int main() {
   print("canonical ASCII", canonical);
   print("normalization-heavy", normalization_heavy);
+  print("Unicode and IDNA", unicode_idna);
+  print("long canonical scans", long_scans);
 }

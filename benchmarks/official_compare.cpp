@@ -21,6 +21,10 @@
 #error "LUCID_URL_DATASET_COMMIT must identify the dataset revision"
 #endif
 
+#if defined(LUCID_URL_AMALGAMATE_ADA)
+#include LUCID_URL_ADA_AMALGAMATION
+#endif
+
 extern "C" {
 std::size_t lucid_bench_initialize(const unsigned char *path,
                                    std::size_t length);
@@ -79,15 +83,15 @@ template <class Result> void ada_parse_and_href(benchmark::State &state) {
   volatile std::size_t href_size = 0;
   for (auto _ : state) {
     for (std::string &input : url_examples) {
-      auto url = ada::parse<Result>(input);
+      ada::result<Result> url = ada::parse<Result>(input);
       if (url) {
         success++;
         href_size += url->get_href().size();
       }
     }
   }
-  (void)success;
-  (void)href_size;
+  benchmark::DoNotOptimize(success);
+  benchmark::DoNotOptimize(href_size);
   add_counters(state);
 }
 
@@ -100,7 +104,7 @@ void ada_can_parse(benchmark::State &state) {
       }
     }
   }
-  (void)success;
+  benchmark::DoNotOptimize(success);
   add_counters(state);
 }
 
