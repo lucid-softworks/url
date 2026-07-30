@@ -9,6 +9,88 @@
 
 use crate::unicode_tables::{BIDI, CCC, COMPOSE, DECOMP, JOINING, MARK, UTS46, UTS46_MAP};
 
+const BUCKET_SHIFT: u32 = 10;
+const BUCKET_LENGTH: usize = (0x110000 >> BUCKET_SHIFT) + 1;
+
+const fn build_range3_buckets<const N: usize>(table: &[(u32, u32, u8)], shift: u32) -> [u16; N] {
+    let mut buckets = [0u16; N];
+    let mut bucket = 0usize;
+    let mut index = 0usize;
+    while bucket < N {
+        let code_point = (bucket as u32) << shift;
+        while index < table.len() && table[index].1 < code_point {
+            index += 1;
+        }
+        buckets[bucket] = index as u16;
+        bucket += 1;
+    }
+    buckets
+}
+
+const fn build_point_u8_buckets<const N: usize>(table: &[(u32, u8)], shift: u32) -> [u16; N] {
+    let mut buckets = [0u16; N];
+    let mut bucket = 0usize;
+    let mut index = 0usize;
+    while bucket < N {
+        let code_point = (bucket as u32) << shift;
+        while index < table.len() && table[index].0 < code_point {
+            index += 1;
+        }
+        buckets[bucket] = index as u16;
+        bucket += 1;
+    }
+    buckets
+}
+
+const fn build_point_str_buckets<const N: usize>(table: &[(u32, &str)], shift: u32) -> [u16; N] {
+    let mut buckets = [0u16; N];
+    let mut bucket = 0usize;
+    let mut index = 0usize;
+    while bucket < N {
+        let code_point = (bucket as u32) << shift;
+        while index < table.len() && table[index].0 < code_point {
+            index += 1;
+        }
+        buckets[bucket] = index as u16;
+        bucket += 1;
+    }
+    buckets
+}
+
+const fn build_compose_buckets<const N: usize>(table: &[(u32, u32, u32)], shift: u32) -> [u16; N] {
+    let mut buckets = [0u16; N];
+    let mut bucket = 0usize;
+    let mut index = 0usize;
+    while bucket < N {
+        let code_point = (bucket as u32) << shift;
+        while index < table.len() && table[index].0 < code_point {
+            index += 1;
+        }
+        buckets[bucket] = index as u16;
+        bucket += 1;
+    }
+    buckets
+}
+
+static UTS46_BUCKETS: [u16; BUCKET_LENGTH] = build_range3_buckets(UTS46, BUCKET_SHIFT);
+static UTS46_MAP_BUCKETS: [u16; BUCKET_LENGTH] = build_point_str_buckets(UTS46_MAP, BUCKET_SHIFT);
+static CCC_BUCKETS: [u16; BUCKET_LENGTH] = build_point_u8_buckets(CCC, BUCKET_SHIFT);
+static DECOMP_BUCKETS: [u16; BUCKET_LENGTH] = build_point_str_buckets(DECOMP, BUCKET_SHIFT);
+static COMPOSE_BUCKETS: [u16; BUCKET_LENGTH] = build_compose_buckets(COMPOSE, BUCKET_SHIFT);
+static BIDI_BUCKETS: [u16; BUCKET_LENGTH] = build_range3_buckets(BIDI, BUCKET_SHIFT);
+
+#[inline]
+fn point_bucket<const N: usize>(buckets: &[u16; N], shift: u32, code_point: u32) -> (usize, usize) {
+    let bucket = (code_point >> shift) as usize;
+    (buckets[bucket] as usize, buckets[bucket + 1] as usize)
+}
+
+#[inline]
+fn range_bucket<const N: usize>(buckets: &[u16; N], shift: u32, code_point: u32) -> (usize, usize) {
+    let (start, end) = point_bucket(buckets, shift, code_point);
+    (start, end.saturating_add(1))
+}
+
 fn is_mark(c: char) -> bool {
     let u = c as u32;
     let idx = MARK.partition_point(|&(_, end)| end < u);
@@ -21,9 +103,11 @@ fn is_mark(c: char) -> bool {
 // Bidi_Class codes (see the BIDI table): 1=L 2=R 3=AL 4=AN 5=EN 6=ES 7=CS 8=ET 9=ON 10=BN 11=NSM.
 fn bidi_class(c: char) -> u8 {
     let u = c as u32;
-    let idx = BIDI.partition_point(|&(_, end, _)| end < u);
-    if idx < BIDI.len() {
-        let (start, end, t) = BIDI[idx];
+    let (start_index, end_index) = range_bucket(&BIDI_BUCKETS, BUCKET_SHIFT, u);
+    let table = &BIDI[start_index..end_index.min(BIDI.len())];
+    let idx = table.partition_point(|&(_, end, _)| end < u);
+    if idx < table.len() {
+        let (start, end, t) = table[idx];
         if u >= start && u <= end {
             return t;
         }
@@ -32,28 +116,40 @@ fn bidi_class(c: char) -> u8 {
 }
 
 /// IDNA CheckBidi rule (RFC 5893) for one label of a bidi domain.
-fn label_bidi_ok(chars: &[char]) -> bool {
-    let classes: Vec<u8> = chars.iter().map(|&c| bidi_class(c)).collect();
-    let last_non_nsm = classes.iter().rev().find(|&&c| c != 11).copied();
-    match classes[0] {
-        // RTL label (starts R or AL).
-        2 | 3 => {
-            if !classes.iter().all(|&c| matches!(c, 2..=11)) {
-                return false;
-            }
-            if !matches!(last_non_nsm, Some(2..=5)) {
-                return false;
-            }
-            !(classes.contains(&5) && classes.contains(&4))
+fn label_bidi_ok(chars: impl IntoIterator<Item = char>) -> bool {
+    let mut chars = chars.into_iter();
+    let Some(first_character) = chars.next() else {
+        return false;
+    };
+    let first = bidi_class(first_character);
+    if !matches!(first, 1..=3) {
+        return false;
+    }
+
+    let mut last_non_nsm = None;
+    let mut has_an = false;
+    let mut has_en = false;
+    for character in std::iter::once(first_character).chain(chars) {
+        let class = bidi_class(character);
+        let allowed = match first {
+            2 | 3 => matches!(class, 2..=11),
+            1 => matches!(class, 1 | 5..=11),
+            _ => unreachable!(),
+        };
+        if !allowed {
+            return false;
         }
-        // LTR label (starts L).
-        1 => {
-            if !classes.iter().all(|&c| matches!(c, 1 | 5..=11)) {
-                return false;
-            }
-            matches!(last_non_nsm, Some(1 | 5))
+        if class != 11 {
+            last_non_nsm = Some(class);
         }
-        _ => false,
+        has_an |= class == 4;
+        has_en |= class == 5;
+    }
+
+    match first {
+        2 | 3 => matches!(last_non_nsm, Some(2..=5)) && !(has_an && has_en),
+        1 => matches!(last_non_nsm, Some(1 | 5)),
+        _ => unreachable!(),
     }
 }
 
@@ -111,15 +207,22 @@ enum Status {
 
 fn uts46_status(c: char) -> Status {
     let u = c as u32;
-    let idx = UTS46.partition_point(|&(_, end, _)| end < u);
-    if idx < UTS46.len() {
-        let (start, end, kind) = UTS46[idx];
+    let (start_index, end_index) = range_bucket(&UTS46_BUCKETS, BUCKET_SHIFT, u);
+    let table = &UTS46[start_index..end_index.min(UTS46.len())];
+    let idx = table.partition_point(|&(_, end, _)| end < u);
+    if idx < table.len() {
+        let (start, end, kind) = table[idx];
         if u >= start && u <= end {
             return match kind {
                 0 => Status::Valid,
                 1 => {
-                    let mi = UTS46_MAP.partition_point(|&(s, _)| s < start);
-                    Status::Mapped(UTS46_MAP[mi].1)
+                    let (map_start, map_end) =
+                        point_bucket(&UTS46_MAP_BUCKETS, BUCKET_SHIFT, start);
+                    let mappings = &UTS46_MAP[map_start..map_end];
+                    let mi = mappings
+                        .binary_search_by_key(&start, |&(code_point, _)| code_point)
+                        .expect("mapped UTS-46 ranges have mapping data");
+                    Status::Mapped(mappings[mi].1)
                 }
                 2 => Status::Ignored,
                 _ => Status::Disallowed,
@@ -131,10 +234,24 @@ fn uts46_status(c: char) -> Status {
 
 fn ccc(c: char) -> u8 {
     let u = c as u32;
-    match CCC.binary_search_by(|&(cp, _)| cp.cmp(&u)) {
-        Ok(i) => CCC[i].1,
+    if u < 0x300 {
+        return 0;
+    }
+    let (start, end) = point_bucket(&CCC_BUCKETS, BUCKET_SHIFT, u);
+    let table = &CCC[start..end];
+    match table.binary_search_by_key(&u, |&(code_point, _)| code_point) {
+        Ok(i) => table[i].1,
         Err(_) => 0,
     }
+}
+
+fn canonical_decomposition(code_point: u32) -> Option<&'static str> {
+    let (start, end) = point_bucket(&DECOMP_BUCKETS, BUCKET_SHIFT, code_point);
+    let table = &DECOMP[start..end];
+    table
+        .binary_search_by_key(&code_point, |&(candidate, _)| candidate)
+        .ok()
+        .map(|index| table[index].1)
 }
 
 fn decompose(c: char, out: &mut Vec<char>) {
@@ -149,9 +266,9 @@ fn decompose(c: char, out: &mut Vec<char>) {
         }
         return;
     }
-    match DECOMP.binary_search_by(|&(cp, _)| cp.cmp(&u)) {
-        Ok(i) => out.extend(DECOMP[i].1.chars()),
-        Err(_) => out.push(c),
+    match canonical_decomposition(u) {
+        Some(decomposition) => out.extend(decomposition.chars()),
+        None => out.push(c),
     }
 }
 
@@ -190,10 +307,30 @@ fn compose_pair(a: char, b: char) -> Option<char> {
     {
         return char::from_u32(au + (bu - T_BASE));
     }
-    match COMPOSE.binary_search_by(|&(x, y, _)| (x, y).cmp(&(au, bu))) {
-        Ok(i) => char::from_u32(COMPOSE[i].2),
+    let (start, end) = point_bucket(&COMPOSE_BUCKETS, BUCKET_SHIFT, au);
+    let table = &COMPOSE[start..end];
+    match table.binary_search_by(|&(x, y, _)| (x, y).cmp(&(au, bu))) {
+        Ok(i) => char::from_u32(table[i].2),
         Err(_) => None,
     }
+}
+
+fn definitely_nfc(input: &str) -> bool {
+    let mut previous = None;
+    for character in input.chars() {
+        let code_point = character as u32;
+        if ccc(character) != 0
+            || (S_BASE..S_BASE + S_COUNT).contains(&code_point)
+            || canonical_decomposition(code_point).is_some()
+        {
+            return false;
+        }
+        if previous.is_some_and(|starter| compose_pair(starter, character).is_some()) {
+            return false;
+        }
+        previous = Some(character);
+    }
+    true
 }
 
 fn nfc(input: &str) -> String {
@@ -202,47 +339,34 @@ fn nfc(input: &str) -> String {
         decompose(c, &mut chars);
     }
     canonical_order(&mut chars);
-    // Canonical composition.
+    // Canonical composition. Keep the current starter in the output so
+    // combining marks can be composed without allocating a temporary vector
+    // for every starter sequence.
     let mut out: Vec<char> = Vec::with_capacity(chars.len());
-    let mut i = 0;
-    while i < chars.len() {
-        let c = chars[i];
-        if ccc(c) == 0 {
-            let mut composed = c;
-            let mut last_class: i32 = -1;
-            let mut remaining: Vec<char> = Vec::new();
-            let mut j = i + 1;
-            while j < chars.len() {
-                let d = chars[j];
-                let dcc = ccc(d) as i32;
-                if last_class < dcc {
-                    if let Some(x) = compose_pair(composed, d) {
-                        composed = x;
-                        j += 1;
-                        continue;
-                    }
-                }
-                if dcc == 0 {
-                    break;
-                }
-                last_class = dcc;
-                remaining.push(d);
-                j += 1;
+    let mut starter = None;
+    let mut last_class = 0u8;
+    for character in chars {
+        let class = ccc(character);
+        if let Some(starter_index) = starter {
+            if (last_class == 0 || last_class < class)
+                && let Some(composed) = compose_pair(out[starter_index], character)
+            {
+                out[starter_index] = composed;
+                continue;
             }
-            out.push(composed);
-            out.extend(remaining);
-            i = j;
-        } else {
-            out.push(c);
-            i += 1;
         }
+        if class == 0 {
+            starter = Some(out.len());
+        }
+        last_class = class;
+        out.push(character);
     }
     out.into_iter().collect()
 }
 
 /// A UTS-46 label is valid if it is NFC, doesn't begin with a combining mark, and every code point
 /// has "valid" status (CheckHyphens/CheckBidi off, per the WPT options).
-fn valid_label(chars: &[char], check_bidi: bool) -> bool {
+fn valid_normalized_label(chars: &[char], check_bidi: bool) -> bool {
     if chars.is_empty() {
         return false;
     }
@@ -250,7 +374,7 @@ fn valid_label(chars: &[char], check_bidi: bool) -> bool {
     if is_mark(chars[0]) {
         return false;
     }
-    if check_bidi && !label_bidi_ok(chars) {
+    if check_bidi && !label_bidi_ok(chars.iter().copied()) {
         return false;
     }
     for (idx, &c) in chars.iter().enumerate() {
@@ -267,8 +391,19 @@ fn valid_label(chars: &[char], check_bidi: bool) -> bool {
             return false;
         }
     }
-    let s: String = chars.iter().collect();
-    nfc(&s) == s
+    true
+}
+
+fn valid_normalized_ascii_label(label: &str, check_bidi: bool) -> bool {
+    if label.is_empty() {
+        return false;
+    }
+    if check_bidi && !label_bidi_ok(label.chars()) {
+        return false;
+    }
+    label
+        .chars()
+        .all(|character| matches!(uts46_status(character), Status::Valid))
 }
 
 /// UTS-46 ToASCII (the host parser's domain-to-ASCII step).
@@ -284,47 +419,45 @@ pub(crate) fn domain_to_ascii(domain: &str) -> Result<String, ()> {
         }
     }
     // 2. Normalize (NFC).
-    let normalized = nfc(&mapped);
-    // 3. Split into labels. WHATWG host parsing preserves ASCII A-label text
-    //    verbatim after UTS-46 mapping, including labels whose `xn--` suffix is
-    //    not decodable Punycode. `verbatim` holds ASCII output and `uni` is the
-    //    form used by the remaining validation steps.
-    let mut labels: Vec<(Option<String>, Vec<char>)> = Vec::new();
-    for label in normalized.split('.') {
-        if label.is_ascii() {
-            labels.push((Some(label.to_string()), label.chars().collect()));
-        } else {
-            if label.starts_with("xn--") {
-                return Err(());
-            }
-            labels.push((None, label.chars().collect()));
-        }
-    }
+    let normalized = if mapped.is_ascii() || definitely_nfc(&mapped) {
+        mapped
+    } else {
+        nfc(&mapped)
+    };
+    // 3. WHATWG host parsing preserves ASCII A-label text verbatim after
+    // UTS-46 mapping, including labels whose `xn--` suffix is not decodable
+    // Punycode.
     // 4. A domain is a "bidi domain" if any label (in its Unicode form) has an R/AL/AN code point;
     //    CheckBidi then applies to every label.
-    let check_bidi = labels
-        .iter()
-        .any(|(_, uni)| uni.iter().any(|&c| matches!(bidi_class(c), 2..=4)));
+    let check_bidi = normalized
+        .chars()
+        .any(|character| matches!(bidi_class(character), 2..=4));
     // 5. Validate each non-empty label and assemble the ASCII output.
-    let mut out = String::new();
-    for (i, (verbatim, uni)) in labels.iter().enumerate() {
+    let mut out = String::with_capacity(normalized.len());
+    for (i, label) in normalized.split('.').enumerate() {
         if i > 0 {
             out.push('.');
         }
-        if uni.is_empty() {
+        if label.is_empty() {
             // Empty label (e.g. a trailing dot) — allowed.
             continue;
         }
-        if !valid_label(uni, check_bidi) {
+        if label.is_ascii() {
+            if !valid_normalized_ascii_label(label, check_bidi) {
+                return Err(());
+            }
+            out.push_str(label);
+            continue;
+        }
+        if label.starts_with("xn--") {
             return Err(());
         }
-        match verbatim {
-            Some(s) => out.push_str(s),
-            None => {
-                out.push_str("xn--");
-                out.push_str(&punycode_encode(uni).ok_or(())?);
-            }
+        let characters: Vec<char> = label.chars().collect();
+        if !valid_normalized_label(&characters, check_bidi) {
+            return Err(());
         }
+        out.push_str("xn--");
+        out.push_str(&punycode_encode(&characters).ok_or(())?);
     }
     if out.is_empty() {
         return Err(());
