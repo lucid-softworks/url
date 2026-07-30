@@ -693,6 +693,7 @@ impl UrlAggregator {
         }))
     }
 
+    #[inline(always)]
     fn try_fast_clean_http_components(input: &str) -> Option<FastHttpScan> {
         let bytes = input.as_bytes();
         let protocol_end = if bytes.starts_with(b"https://") {
@@ -751,6 +752,12 @@ impl UrlAggregator {
                     && four_bytes_have_class(bytes, cursor, BYTE_PATH_NO_DOT)
                 {
                     cursor += 4;
+                    continue;
+                }
+                if cursor + 2 <= bytes.len()
+                    && two_bytes_have_class(bytes, cursor, BYTE_PATH_NO_DOT)
+                {
+                    cursor += 2;
                     continue;
                 }
                 let byte = bytes[cursor];
@@ -2564,6 +2571,14 @@ fn four_bytes_have_class(bytes: &[u8], start: usize, class: u8) -> bool {
         != 0
 }
 
+#[inline(always)]
+fn two_bytes_have_class(bytes: &[u8], start: usize, class: u8) -> bool {
+    let &[a, b] = &bytes[start..start + 2] else {
+        unreachable!();
+    };
+    BYTE_CLASSES[a as usize] & BYTE_CLASSES[b as usize] & class != 0
+}
+
 #[inline]
 fn path_byte_is_canonical(byte: u8) -> bool {
     BYTE_CLASSES[byte as usize] & BYTE_PATH != 0
@@ -2590,7 +2605,8 @@ fn dot_segment(segment: &[u8]) -> bool {
     single_dot_segment(segment) || double_dot_segment(segment)
 }
 
-#[inline(always)]
+#[cold]
+#[inline(never)]
 fn dot_path_segment_at(bytes: &[u8], start: usize) -> bool {
     if !matches!(bytes.get(start), Some(b'.' | b'%')) {
         return false;
