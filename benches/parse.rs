@@ -25,6 +25,24 @@ const NORMALIZATION_HEAVY: &[&str] = &[
     "https://user name:pass word@example.com/",
 ];
 
+const UNICODE_IDNA: &[&str] = &[
+    "https://bücher.example/straße",
+    "https://mañana.example/café",
+    "https://例え.テスト/パス",
+    "https://παράδειγμα.δοκιμή/",
+    "https://مثال.إختبار/",
+    "https://उदाहरण.भारत/",
+    "https://한국어.example/",
+    "https://cafe\u{301}.example/résumé",
+    "https://ＥＸＡＭＰＬＥ.com/",
+];
+
+const LONG_SCANS: &[&str] = &[
+    "https://assets.example.com/packages/catalogue/components/react/dialog-manager/examples/controlled-dialog/source/index.tsx?framework=react&bundler=vite&render=client&theme=system#interactive-example",
+    "https://api.example.com/v1/organizations/lucid-softworks/repositories/url/commits/306db12a15e0d5ed3428934622a187b720ae5741/check-runs?filter=latest&per_page=100",
+    "https://cdn.example.com/assets/0123456789abcdefghijklmnopqrstuvwxyz/0123456789abcdefghijklmnopqrstuvwxyz/0123456789abcdefghijklmnopqrstuvwxyz/module.min.js?cache=0123456789abcdefghijklmnopqrstuvwxyz",
+];
+
 fn sample(urls: &[&str], operation: &mut impl FnMut(&str) -> usize) -> (f64, usize) {
     let minimum_duration = std::env::var("LUCID_URL_BENCH_SAMPLE_MS")
         .ok()
@@ -78,6 +96,22 @@ fn run(name: &str, urls: &[&str]) {
 }
 
 fn main() {
+    if let Some(index) = std::env::var("LUCID_URL_BENCH_UNICODE_INDEX")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+    {
+        let input = UNICODE_IDNA[index];
+        run(input, std::slice::from_ref(&input));
+        return;
+    }
+    if let Some(index) = std::env::var("LUCID_URL_BENCH_LONG_INDEX")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+    {
+        let input = LONG_SCANS[index];
+        run(input, std::slice::from_ref(&input));
+        return;
+    }
     if let Some(index) = std::env::var("LUCID_URL_BENCH_CANONICAL_INDEX")
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
@@ -96,6 +130,8 @@ fn main() {
     }
     run("canonical ASCII", CANONICAL);
     run("normalization-heavy", NORMALIZATION_HEAVY);
+    run("Unicode and IDNA", UNICODE_IDNA);
+    run("long canonical scans", LONG_SCANS);
     if std::env::var_os("LUCID_URL_BENCH_INDIVIDUAL").is_some() {
         for input in NORMALIZATION_HEAVY {
             run(input, std::slice::from_ref(input));
