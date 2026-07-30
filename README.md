@@ -62,13 +62,28 @@ The parser mirrors Ada's URL-facing concepts:
 
 ## Conformance
 
-The parser was checked against the Web Platform Tests available during
-development:
+The repository includes Ada's parser fixtures at a pinned test revision. A
+fresh checkout runs them through both `Url` and `UrlAggregator` as part of
+ordinary `cargo test`; missing or malformed fixtures are hard failures.
 
-- URL parsing and serialization: 891/891
-- `can_parse`: 891/891
-- URL setters: 278/278
-- `IdnaTestV2` through the host parser: 2671/2671
+- URL parsing, serialization, getters, and `can_parse`: 919 cases
+- URL setters: 296 cases
+- `IdnaTestV2` through the host parser: 2671 cases
+- Ada ToASCII success cases: 68 cases
+- percent encoding: 7 cases
+- DNS/domain-length validation: 17 cases
+
+Run the mandatory suite directly with:
+
+```sh
+cargo test --test ada_conformance --locked
+```
+
+The fixtures can be refreshed to another Ada revision with
+`./scripts/update-ada-fixtures.sh <commit>`. A daily workflow also runs the
+suite against Ada's current `main` and fails when upstream parser tests change.
+The exact coverage and justified exclusions are documented in
+[`tests/ADA_TEST_SCOPE.md`](tests/ADA_TEST_SCOPE.md).
 
 The parser has direct paths for validated canonical URLs and common
 normalization work, including percent encoding, path normalization, IPv4,
@@ -77,24 +92,35 @@ complete WHATWG state machine.
 
 ## Benchmarks
 
-Run the focused Rust benchmark:
+Run the default, pinned comparison against Ada:
+
+```sh
+./benchmarks/run.sh
+```
+
+This command always fetches and builds both implementations, then runs them in
+the same Google Benchmark executable over the same corpus. It prints the
+operating system, compiler versions, Ada options, Ada revision, and dataset
+revision before reporting results. A missing compiler or failed Ada build is a
+hard failure rather than a Lucid-only fallback.
+
+The comparison fetches Ada's 100,025-URL dataset at commit
+`9749b92c13e970e70409948fa862461191504ccc`. Ada is pinned to the exact
+[Ada v4 release benchmark](https://www.yagiz.co/release-of-ada-v4) commit,
+`16a5772360d4b901fc3b35ee1ee6947782ab9491`.
+
+Ada's optional simdutf path is off by default, matching Ada's default build.
+It can be measured explicitly with:
+
+```sh
+ADA_USE_SIMDUTF=ON ./benchmarks/run.sh
+```
+
+For Lucid-only development regressions, without making a comparison claim:
 
 ```sh
 cargo bench --bench parse
 ```
-
-For a pinned comparison against Ada:
-
-```sh
-./benchmarks/compare-ada.sh
-```
-
-The harness uses the same URL corpora, operation, warm-up policy, sample count,
-and median calculation for both implementations. The comparison script also
-fetches Ada's 100,025-URL dataset at commit
-`9749b92c13e970e70409948fa862461191504ccc`. Ada is pinned to the exact
-[Ada v4 release benchmark](https://www.yagiz.co/release-of-ada-v4) commit,
-`16a5772360d4b901fc3b35ee1ee6947782ab9491`.
 
 Results on an Apple M4 running macOS 26.5.2, Rust 1.97.0, and Apple Clang 21:
 
@@ -143,17 +169,11 @@ cannot hide workload-specific behavior.
 
 ### Official Ada benchmark protocol
 
-The repository can also run both libraries through the Google Benchmark
-protocol used for the [Ada v4 release
-benchmark](https://www.yagiz.co/release-of-ada-v4):
-
-```sh
-./benchmarks/compare-ada-official.sh
-```
-
-This pins Ada and its dataset to the commits above, runs the official
-parse-plus-href and `can_parse` operations, and reports the mean of five
-repetitions. Results from the same Apple M4 system:
+The default benchmark uses the Google Benchmark protocol from the
+[Ada v4 release benchmark](https://www.yagiz.co/release-of-ada-v4). It runs
+the official parse-plus-href and `can_parse` operations and reports the mean
+of five repetitions. `./benchmarks/compare-ada-official.sh` remains as a
+backwards-compatible alias. Results from the same Apple M4 system:
 
 | Operation | Lucid ns/URL | Ada ns/URL | Lucid speedup |
 | --- | ---: | ---: | ---: |

@@ -1,0 +1,47 @@
+name: Ada compatibility
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  latest:
+    name: Latest Ada tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Check out Ada main
+        run: git clone --depth=1 https://github.com/ada-url/ada.git target/ada-latest
+      - name: Run Ada fixture suite
+        env:
+          ADA_TEST_ROOT: ${{ github.workspace }}/target/ada-latest/tests/wpt
+        run: cargo test --test ada_conformance --locked
+      - name: Detect upstream parser-test changes
+        run: |
+          pinned_revision="$(cat tests/fixtures/ada/REVISION)"
+          git -C target/ada-latest fetch --depth=1 origin "${pinned_revision}"
+          if ! git -C target/ada-latest diff --quiet \
+            "${pinned_revision}..HEAD" -- \
+            tests/wpt \
+            tests/wpt_url_tests.cpp \
+            tests/basic_tests.cpp \
+            tests/url_components.cpp \
+            tests/from_file_tests.cpp \
+            tests/max_input_length.cpp; then
+            git -C target/ada-latest diff --stat \
+              "${pinned_revision}..HEAD" -- \
+              tests/wpt \
+              tests/wpt_url_tests.cpp \
+              tests/basic_tests.cpp \
+              tests/url_components.cpp \
+              tests/from_file_tests.cpp \
+              tests/max_input_length.cpp
+            echo "Ada parser tests changed; review and refresh the pinned compatibility suite." >&2
+            exit 1
+          fi

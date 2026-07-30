@@ -38,3 +38,24 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo package --locked
+
+  ada-conformance:
+    name: Ada conformance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --test ada_conformance --test ada_max_input_length --locked
+
+  benchmark-smoke:
+    name: Benchmark comparison smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build and run both parsers
+        env:
+          BENCHMARK_REPETITIONS: 1
+        run: ./benchmarks/run.sh --benchmark_min_time=0.001s

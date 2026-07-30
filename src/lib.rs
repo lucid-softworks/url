@@ -192,7 +192,15 @@ pub fn can_parse(input: &str, base: Option<&str>) -> bool {
     if input.len() > limit as usize {
         return false;
     }
-    if base.is_none() && limit == u32::MAX {
+    if limit != u32::MAX {
+        return match base {
+            None => UrlAggregator::parse(input).is_ok(),
+            Some(base) => UrlAggregator::parse(base)
+                .and_then(|base| UrlAggregator::parse_with_base(input, &base))
+                .is_ok(),
+        };
+    }
+    if base.is_none() {
         if let Some(result) = try_can_parse_clean_http(input) {
             return result;
         }
@@ -412,10 +420,10 @@ pub fn href_from_file(path: &str) -> String {
     for character in path.chars() {
         match character {
             '\\' => result.push('/'),
+            '\t' | '\n' | '\r' => {}
             ' ' => result.push_str("%20"),
             '#' => result.push_str("%23"),
             '?' => result.push_str("%3F"),
-            '%' => result.push_str("%25"),
             character => result.push(character),
         }
     }
@@ -1507,8 +1515,16 @@ impl UrlAggregator {
                 origin.push_str(self.get_host());
                 origin
             }
-            "blob:" => legacy::Url::parse(self.get_pathname())
-                .map_or_else(|()| "null".to_owned(), |url| url.origin()),
+            "blob:" => legacy::Url::parse(self.get_pathname()).map_or_else(
+                |()| "null".to_owned(),
+                |url| {
+                    if matches!(url.scheme(), "http" | "https" | "file") {
+                        url.origin()
+                    } else {
+                        "null".to_owned()
+                    }
+                },
+            ),
             _ => "null".to_owned(),
         }
     }
@@ -2372,9 +2388,11 @@ fn valid_domain(hostname: &str) -> bool {
     if hostname.starts_with('[') {
         return true;
     }
-    hostname.len() <= 255
-        && hostname
-            .trim_end_matches('.')
+    let (domain, maximum_length) = hostname
+        .strip_suffix('.')
+        .map_or((hostname, 253), |domain| (domain, 254));
+    hostname.len() <= maximum_length
+        && domain
             .split('.')
             .all(|label| !label.is_empty() && label.len() <= 63)
 }

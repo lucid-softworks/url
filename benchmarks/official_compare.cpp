@@ -14,6 +14,12 @@
 #ifndef LUCID_URL_DATASET
 #error "LUCID_URL_DATASET must identify the pinned Ada URL corpus"
 #endif
+#ifndef LUCID_URL_ADA_COMMIT
+#error "LUCID_URL_ADA_COMMIT must identify the Ada revision"
+#endif
+#ifndef LUCID_URL_DATASET_COMMIT
+#error "LUCID_URL_DATASET_COMMIT must identify the dataset revision"
+#endif
 
 extern "C" {
 std::size_t lucid_bench_initialize(const unsigned char *path,
@@ -155,10 +161,8 @@ int main(int argc, char **argv) {
   }
   const auto lucid_invalid = lucid_bench_count_invalid();
 
-  benchmark::AddCustomContext("Ada commit",
-                              "16a5772360d4b901fc3b35ee1ee6947782ab9491");
-  benchmark::AddCustomContext("dataset commit",
-                              "9749b92c13e970e70409948fa862461191504ccc");
+  benchmark::AddCustomContext("Ada commit", LUCID_URL_ADA_COMMIT);
+  benchmark::AddCustomContext("dataset commit", LUCID_URL_DATASET_COMMIT);
   benchmark::AddCustomContext("number of URLs",
                               std::to_string(url_examples.size()));
   benchmark::AddCustomContext("Ada invalid URLs", std::to_string(ada_invalid));

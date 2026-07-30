@@ -408,6 +408,7 @@ fn valid_normalized_ascii_label(label: &str, check_bidi: bool) -> bool {
 
 /// UTS-46 ToASCII (the host parser's domain-to-ASCII step).
 pub(crate) fn domain_to_ascii(domain: &str) -> Result<String, ()> {
+    let validate_alabels = !domain.is_ascii();
     // 1. Map (and reject disallowed code points).
     let mut mapped = String::with_capacity(domain.len());
     for c in domain.chars() {
@@ -445,6 +446,12 @@ pub(crate) fn domain_to_ascii(domain: &str) -> Result<String, ()> {
         if label.is_ascii() {
             if !valid_normalized_ascii_label(label, check_bidi) {
                 return Err(());
+            }
+            if validate_alabels && let Some(encoded) = label.strip_prefix("xn--") {
+                let decoded = punycode_decode(encoded).ok_or(())?;
+                if !valid_normalized_label(&decoded, check_bidi) {
+                    return Err(());
+                }
             }
             out.push_str(label);
             continue;
@@ -558,6 +565,7 @@ fn punycode_encode(input: &[char]) -> Option<String> {
 /// is required.
 pub(crate) fn push_simple_domain_to_ascii(output: &mut String, domain: &str) -> bool {
     let original_length = output.len();
+    let validate_alabels = !domain.is_ascii();
     if domain.is_empty() {
         return false;
     }
@@ -609,6 +617,14 @@ pub(crate) fn push_simple_domain_to_ascii(output: &mut String, domain: &str) -> 
                 return false;
             }
         } else {
+            if validate_alabels
+                && let Some(encoded) = label.strip_prefix("xn--")
+                && punycode_decode(encoded)
+                    .is_none_or(|decoded| !valid_normalized_label(&decoded, false))
+            {
+                output.truncate(original_length);
+                return false;
+            }
             let start = output.len();
             output.push_str(label);
             output[start..].make_ascii_lowercase();
@@ -712,7 +728,6 @@ fn punycode_encode_str_into(output: &mut String, input: &str) -> bool {
     true
 }
 
-#[allow(dead_code)]
 pub(crate) fn punycode_decode(input: &str) -> Option<Vec<char>> {
     fn basic_to_digit(c: u8) -> Option<u32> {
         match c {
