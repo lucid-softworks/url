@@ -105,9 +105,8 @@ revision before reporting results. A missing compiler or failed Ada build is a
 hard failure rather than a Lucid-only fallback.
 
 The comparison fetches Ada's 100,025-URL dataset at commit
-`9749b92c13e970e70409948fa862461191504ccc`. Ada is pinned to the exact
-[Ada v4 release benchmark](https://www.yagiz.co/release-of-ada-v4) commit,
-`16a5772360d4b901fc3b35ee1ee6947782ab9491`.
+`9749b92c13e970e70409948fa862461191504ccc`. Ada is pinned to commit
+`0a371d6b82c282948597d80f63e856862c8ce667`.
 
 Both parsers are built with peak local throughput defaults:
 
@@ -132,7 +131,11 @@ cargo bench --bench parse
 
 These microbenchmarks exercise focused canonical, normalization, Unicode,
 IDNA, and long-input paths. They are regression aids rather than published
-Ada comparisons.
+Ada comparisons. Each section prints the dataset it runs (`# source`,
+`# urls=… bytes=…`, and the URL list). Cap listing with
+`LUCID_URL_BENCH_DATASET_PRINT=N`. The large real-world corpus is Ada's
+[`url-dataset`](https://github.com/ada-url/url-dataset) `out.txt`; mixed top
+sites match Ada's default `url_examples_default` from `benchmarks/bench.cpp`.
 
 ### Official Ada benchmark protocol
 
@@ -142,33 +145,48 @@ the official parse-plus-href and `can_parse` operations and reports the mean
 of five repetitions. It also refuses to run if the parsers disagree about
 which corpus inputs are valid or how any accepted input is serialized.
 
-Results from `./benchmarks/compare-ada.sh` on an Apple M4 running macOS 26.5
-(matched no-LTO builds, Ada amalgamated into the harness, `ADA_USE_SIMDUTF=OFF`):
+Results from the improved `./benchmarks/compare-ada.sh` harness on an Apple M5 Max
+running macOS 26.5 (matched no-LTO builds, Ada amalgamated into the harness,
+`ADA_USE_SIMDUTF=OFF`, Ada `0a371d6b82c282948597d80f63e856862c8ce667`). Prefer
+`./benchmarks/run.sh` for the single-process Google Benchmark protocol.
 
 #### Microbenchmarks
 
 | Workload | Lucid `UrlAggregator` | Lucid `Url` | Ada `url_aggregator` | Ada `url` |
 | --- | ---: | ---: | ---: | ---: |
-| Canonical ASCII | 48.08 | 67.55 | 78.43 | 88.63 |
-| Normalization-heavy | 96.66 | 109.18 | 148.00 | 144.66 |
-| Unicode and IDNA | 719.78 | 727.39 | 397.80 | 476.25 |
-| Long canonical scans | 52.91 | 71.44 | 114.44 | 185.26 |
+| Canonical ASCII | 48.50 | 66.94 | 70.26 | 86.91 |
+| Normalization-heavy | 92.70 | 110.06 | 156.03 | 147.73 |
+| Unicode and IDNA | 730.70 | 751.74 | 397.01 | 407.75 |
+| Long canonical scans | 54.36 | 73.57 | 66.63 | 95.14 |
 
-Values are ns/URL.
+Values are ns/URL. Microbenchmark numbers above are from the previous full run;
+re-run `./benchmarks/compare-ada.sh` after harness changes if you need a matched
+micro set.
 
 #### Real-world corpora
 
 | Corpus | Operation | Lucid ns/URL | Ada ns/URL | Lucid speedup |
 | --- | --- | ---: | ---: | ---: |
-| Top sites (11) | `UrlAggregator` | 55.26 | 85.14 | 1.54× |
-| Top sites (11) | `Url` | 71.14 | 110.14 | 1.55× |
-| Top sites (11) | `can_parse` | 15.16 | 42.03 | 2.77× |
-| Benchdata (100,025) | `UrlAggregator` | 52.93 | 87.27 | 1.65× |
-| Benchdata (100,025) | `Url` | 77.08 | 120.58 | 1.56× |
-| Benchdata (100,025) | `can_parse` | 10.95 | 30.91 | 2.82× |
+| Clean HTTP (24) | `can_parse` | 6.64 | 10.15 | 1.53× |
+| Benchdata (100,025) | `UrlAggregator` | 52.04 | 51.98 | 1.00× |
+| Benchdata (100,025) | `Url` | 113.29 | 79.21 | 0.70× |
+| Benchdata (100,025) | `can_parse` | 10.35 | 12.33 | 1.19× |
+
+Corpora are split on purpose:
+
+- **Mixed top sites** measure parse+href only (not shown above; the 11-URL set
+  is too small for stable headline numbers and includes IPv4/IPv6/non-special
+  paths). They remain in the harness for local smoke checks.
+- **Clean HTTP** measures `can_parse` on already-canonical special URLs that
+  both fast paths target. A mean over mixed top sites previously overstated the
+  `can_parse` gap because three slow-path URLs dominated eleven samples.
+- **Benchdata** is the large 100k corpus for published parse and `can_parse`
+  claims.
 
 The `Url` path materializes an owned href (matching Ada's `get_href()` protocol)
-so the compiler cannot replace it with a length lookup.
+so the compiler cannot replace it with a length lookup. Ada micro/real-world
+harnesses materialize inputs on the heap and opaque the pointer/length so the
+amalgamated TU cannot constant-fold known string literals.
 
 ### Release artifact size
 

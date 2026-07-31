@@ -83,10 +83,15 @@ template <class Result> void ada_parse_and_href(benchmark::State &state) {
   volatile std::size_t href_size = 0;
   for (auto _ : state) {
     for (std::string &input : url_examples) {
+      // Heap-backed corpus strings are already runtime-opaque; keep the href
+      // result live so the compiler cannot drop serialization work.
       ada::result<Result> url = ada::parse<Result>(input);
+      benchmark::DoNotOptimize(url);
       if (url) {
+        auto href = url->get_href();
+        benchmark::DoNotOptimize(href);
         success++;
-        href_size += url->get_href().size();
+        href_size += href.size();
       }
     }
   }
@@ -99,7 +104,9 @@ void ada_can_parse(benchmark::State &state) {
   volatile std::size_t success = 0;
   for (auto _ : state) {
     for (std::string &input : url_examples) {
-      if (ada::can_parse(input)) {
+      bool const valid = ada::can_parse(input);
+      benchmark::DoNotOptimize(valid);
+      if (valid) {
         success++;
       }
     }
@@ -182,10 +189,33 @@ int main(int argc, char **argv) {
   }
   const auto lucid_invalid = lucid_bench_count_invalid();
 
+  // Dataset report, inspired by ada-url/ada (Loading path + recovered counts).
+  std::cout << "# Loading " << dataset << '\n';
+  std::cout << "# dataset commit: " << LUCID_URL_DATASET_COMMIT << '\n';
+  std::cout << "# Ada commit: " << LUCID_URL_ADA_COMMIT << '\n';
+  std::cout << "# urls=" << url_examples.size()
+            << " bytes=" << static_cast<std::size_t>(url_examples_bytes)
+            << '\n';
+  std::cout << "# invalid urls: Ada=" << ada_invalid
+            << " Lucid=" << lucid_invalid << '\n';
+  constexpr std::size_t sample_limit = 8;
+  for (std::size_t index = 0;
+       index < url_examples.size() && index < sample_limit; ++index) {
+    std::cout << "#   [" << index << "] " << url_examples[index] << '\n';
+  }
+  if (url_examples.size() > sample_limit) {
+    std::cout << "#   ... " << (url_examples.size() - sample_limit)
+              << " more\n";
+  }
+
   benchmark::AddCustomContext("Ada commit", LUCID_URL_ADA_COMMIT);
+  benchmark::AddCustomContext("dataset path", std::string(dataset));
   benchmark::AddCustomContext("dataset commit", LUCID_URL_DATASET_COMMIT);
   benchmark::AddCustomContext("number of URLs",
                               std::to_string(url_examples.size()));
+  benchmark::AddCustomContext(
+      "dataset bytes",
+      std::to_string(static_cast<std::size_t>(url_examples_bytes)));
   benchmark::AddCustomContext("Ada invalid URLs", std::to_string(ada_invalid));
   benchmark::AddCustomContext("Lucid invalid URLs",
                               std::to_string(lucid_invalid));
@@ -193,6 +223,9 @@ int main(int argc, char **argv) {
                               std::to_string(disagreements));
   benchmark::AddCustomContext("serialization disagreements",
                               std::to_string(serialization_disagreements));
+  if (!url_examples.empty()) {
+    benchmark::AddCustomContext("dataset sample[0]", url_examples.front());
+  }
   if (disagreements != 0 || serialization_disagreements != 0) {
     std::cerr << "refusing to benchmark different parser results\n";
     return 3;

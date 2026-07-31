@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ada_commit="${ADA_COMMIT:-16a5772360d4b901fc3b35ee1ee6947782ab9491}"
+ada_commit="${ADA_COMMIT:-0a371d6b82c282948597d80f63e856862c8ce667}"
 dataset_commit="${ADA_DATASET_COMMIT:-9749b92c13e970e70409948fa862461191504ccc}"
 ada_simdutf="${ADA_USE_SIMDUTF:-OFF}"
 ada_root="${repo_root}/target/ada-benchmark"
@@ -182,15 +182,20 @@ compile_ada_harness \
   "${repo_root}/benchmarks/ada_real_world.cpp" \
   "${ada_real_world_binary}"
 
-echo "lucid-url"
+export ADA_DATASET_COMMIT="${dataset_commit}"
+export ADA_COMMIT="${ada_commit}"
+
+echo "lucid-url microbenchmarks"
 cargo bench --manifest-path "${repo_root}/Cargo.toml" --bench parse
 
 echo
-echo "Ada ${ada_commit}"
+echo "Ada ${ada_commit} microbenchmarks"
 "${ada_binary}"
 
 echo
 echo "lucid-url real-world corpora"
+echo "(mixed top sites = parse only; clean HTTP = can_parse; benchdata = both)"
+echo "dataset: ${dataset_root}/out.txt @ ${dataset_commit}"
 cargo bench \
   --manifest-path "${repo_root}/Cargo.toml" \
   --bench real_world \
@@ -199,4 +204,6 @@ cargo bench \
 
 echo
 echo "Ada ${ada_commit} real-world corpora"
+echo "(mixed top sites = parse only; clean HTTP = can_parse; benchdata = both)"
+echo "dataset: ${dataset_root}/out.txt @ ${dataset_commit}"
 "${ada_real_world_binary}" "${dataset_root}/out.txt"
