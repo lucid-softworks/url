@@ -48,15 +48,26 @@ fn sample(urls: &[&str], operation: &mut impl FnMut(&str) -> usize) -> (f64, usi
         .ok()
         .and_then(|value| value.parse().ok())
         .map_or(Duration::from_millis(300), Duration::from_millis);
+
+    // Warm one pass so timed samples are not dominated by cold I-cache.
+    {
+        let mut checksum = 0usize;
+        for _ in 0..64 {
+            for input in urls {
+                checksum = checksum.wrapping_add(black_box(operation(black_box(*input))));
+            }
+        }
+        black_box(checksum);
+    }
+
     let mut iterations = 1usize;
     loop {
         let start = Instant::now();
         let mut checksum = 0usize;
         for _ in 0..iterations {
-            checksum ^= urls
-                .iter()
-                .map(|input| black_box(operation(black_box(input))))
-                .sum::<usize>();
+            for input in urls {
+                checksum = checksum.wrapping_add(black_box(operation(black_box(*input))));
+            }
         }
         let elapsed = start.elapsed();
         if elapsed >= minimum_duration {
@@ -80,7 +91,26 @@ fn measure(urls: &[&str], mut operation: impl FnMut(&str) -> usize) -> (f64, f64
     (median, 1_000_000_000.0 / median, checksum)
 }
 
+/// Print the corpus under test, Ada-style (`# urls=…`, full listing for small sets).
+fn print_dataset(name: &str, urls: &[&str], source: &str) {
+    let bytes: usize = urls.iter().map(|url| url.len()).sum();
+    println!("\n# {name}");
+    println!("# source: {source}");
+    println!("# urls={} bytes={}", urls.len(), bytes);
+    let max_print = std::env::var("LUCID_URL_BENCH_DATASET_PRINT")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(if urls.len() <= 64 { urls.len() } else { 8 });
+    for (index, url) in urls.iter().enumerate().take(max_print) {
+        println!("#   [{index}] {url}");
+    }
+    if urls.len() > max_print {
+        println!("#   ... {} more", urls.len() - max_print);
+    }
+}
+
 fn run(name: &str, urls: &[&str]) {
+    print_dataset(name, urls, "inline microbenchmark corpus");
     let (aggregate_ns, aggregate_rate, aggregate_sum) = measure(urls, |input| {
         let url = parse::<UrlAggregator>(input, None).unwrap();
         black_box(url.get_href()).len()
@@ -91,7 +121,6 @@ fn run(name: &str, urls: &[&str]) {
     });
 
     black_box((aggregate_sum, url_sum));
-    println!("\n{name}");
     println!("implementation             ns/url        URLs/s");
     println!("lucid UrlAggregator    {aggregate_ns:10.2}  {aggregate_rate:12.0}");
     println!("lucid Url              {url_ns:10.2}  {url_rate:12.0}");

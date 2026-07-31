@@ -2,7 +2,7 @@
 set -euo pipefail
 
 benchmark_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ada_commit="${ADA_COMMIT:-16a5772360d4b901fc3b35ee1ee6947782ab9491}"
+ada_commit="${ADA_COMMIT:-0a371d6b82c282948597d80f63e856862c8ce667}"
 dataset_commit="${ADA_DATASET_COMMIT:-9749b92c13e970e70409948fa862461191504ccc}"
 ada_simdutf="${ADA_USE_SIMDUTF:-OFF}"
 benchmark_repetitions="${BENCHMARK_REPETITIONS:-5}"
@@ -107,11 +107,15 @@ fi
 git -C "${dataset_root}" fetch origin "${dataset_commit}"
 git -C "${dataset_root}" checkout --detach "${dataset_commit}"
 
+export ADA_DATASET_COMMIT="${dataset_commit}"
+export ADA_COMMIT="${ada_commit}"
+
 echo "System: $(uname -a)"
 echo "Rust: $(rustc --version)"
 echo "C++: $(${cxx} --version | head -n 1)"
 echo "CMake: $(cmake --version | head -n 1)"
 echo "Ada commit: ${ada_commit}"
+echo "Dataset path: ${dataset_root}/out.txt"
 echo "Dataset commit: ${dataset_commit}"
 echo "ADA_USE_SIMDUTF: ${ada_simdutf}"
 echo "ADA_ENABLE_LTO: ${enable_lto}"
