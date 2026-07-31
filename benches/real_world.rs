@@ -161,8 +161,7 @@ fn run_can_parse(name: &str, urls: &[&str], source: &str) {
     }
     print_dataset(name, urls, source);
     println!("implementation             ns/url        URLs/s");
-    let (nanoseconds, rate, checksum) =
-        measure(urls, |input| usize::from(can_parse(input, None)));
+    let (nanoseconds, rate, checksum) = measure(urls, |input| usize::from(can_parse(input, None)));
     black_box(checksum);
     print_row("can_parse", nanoseconds, rate);
 }
@@ -231,8 +230,6 @@ fn main() {
         .map(str::to_owned)
         .collect();
     let urls: Vec<&str> = owned.iter().map(String::as_str).collect();
-    let source = format!(
-        "file:{dataset_path} (ada-url/url-dataset out.txt)"
-    );
+    let source = format!("file:{dataset_path} (ada-url/url-dataset out.txt)");
     run_all("benchdata", &urls, &source);
 }
