@@ -66,7 +66,7 @@ The repository includes Ada's parser fixtures at a pinned test revision. A
 fresh checkout runs them through both `Url` and `UrlAggregator` as part of
 ordinary `cargo test`; missing or malformed fixtures are hard failures.
 
-- URL parsing, serialization, getters, and `can_parse`: 919 cases
+- URL parsing, serialization, getters, and `can_parse`: 921 cases
 - URL setters: 296 cases
 - `IdnaTestV2` through the host parser: 2670 representable cases
 - Ada ToASCII success cases: 68 cases
@@ -105,9 +105,9 @@ revision before reporting results. A missing compiler or failed Ada build is a
 hard failure rather than a Lucid-only fallback.
 
 The comparison fetches Ada's 100,025-URL dataset at commit
-`9749b92c13e970e70409948fa862461191504ccc`. Ada is pinned to the exact
-[Ada v4 release benchmark](https://www.yagiz.co/release-of-ada-v4) commit,
-`16a5772360d4b901fc3b35ee1ee6947782ab9491`.
+`9749b92c13e970e70409948fa862461191504ccc`. Ada is pinned to
+`b2c2d7f6b5723a4b924409f9d80ce517d6db8226`, the latest `main` revision
+checked on September 7, 2026. The compatibility fixtures use the same revision.
 
 Ada's optional simdutf path is off by default, matching Ada's default build.
 It can be measured explicitly with:
@@ -134,20 +134,30 @@ the official parse-plus-href and `can_parse` operations and reports the mean
 of five repetitions. It also refuses to run if the parsers disagree about
 which corpus inputs are valid or how any accepted input is serialized.
 
-Results from `./benchmarks/run.sh` on an Apple M4 running macOS 26.5, Rust
-1.97.0, and Apple Clang 21:
+Results from `./benchmarks/run.sh` on September 7, 2026, on an Apple M4
+running macOS 26.5, Rust 1.98.0, and Apple Clang 21, with
+`ADA_USE_SIMDUTF=OFF`. Values are mean CPU time per URL over five repetitions.
+[Raw Google Benchmark results](benchmarks/results/ada-b2c2d7f6.json) are retained
+for reproducibility; the benchmarked Lucid source is commit `23d349f`.
 
 | Operation | Lucid ns/URL | Ada ns/URL | Lucid speedup |
 | --- | ---: | ---: | ---: |
-| `Url` parse + href | 81.61 | 142.29 | 1.74× |
-| `UrlAggregator` parse + href | 57.57 | 88.29 | 1.53× |
-| `can_parse` | 9.26 | 36.60 | 3.95× |
+| `Url` parse + href | 83.06 | 109.49 | 1.32× |
+| `UrlAggregator` parse + href | 58.58 | 58.54 | 1.00× (tie) |
+| `can_parse` | 9.71 | 11.00 | 1.13× |
 
 Both parsers accept, reject, and serialize the same inputs in this 100,025-URL
-run. The `Url` benchmark forces the owned href through an optimization barrier
-so Rust cannot replace materialization with a length lookup.
+run (26 rejected, zero validity or serialization disagreements). The aggregator
+difference is below measurement variability: its coefficient of variation was
+0.52% for Lucid and 1.25% for Ada. The `Url` benchmark forces the owned href
+through an optimization barrier so Rust cannot replace materialization with a
+length lookup.
 
-### Release artifact size
+### Historical release artifact size
+
+These size measurements predate the September 2026 refresh and use Ada
+`16a5772360d4b901fc3b35ee1ee6947782ab9491`; they have not been rerun
+against the current pin.
 
 For a native-code comparison, both libraries were built at optimization level
 3 without LTO so the Apple Mach-O `size` tool could inspect their complete

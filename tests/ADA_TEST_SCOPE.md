@@ -34,3 +34,15 @@ The empty-host `IdnaTestV2` case cannot be isolated through the URL-wrapper
 adaptation: `https:///x` correctly reparses `x` as the host in both Ada and
 WHATWG. Testing that case directly would require Ada's standalone Unicode API,
 which this crate does not expose.
+
+## September 2026 refresh
+
+Fixtures are pinned to `b2c2d7f6b5723a4b924409f9d80ce517d6db8226`.
+The refreshed WPT corpus adds two IPv4-in-IPv6 rejection cases.
+`ada_parser_regressions.rs` additionally adapts public-behavior regressions
+from the upstream C++ tests for NFC host normalization, hexadecimal IPv4,
+IPv6 boundaries, ports, URL whitespace, and credential/query replacement.
+The length-limit suite includes expanded queries and fragments on slow paths.
+These are selected public API regressions, not an execution of Ada's complete
+C++ test suite; its internal SIMD and percent-encoding helper tests are not
+ported directly.

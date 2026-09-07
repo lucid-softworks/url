@@ -2,7 +2,7 @@
 set -euo pipefail
 
 benchmark_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ada_commit="${ADA_COMMIT:-16a5772360d4b901fc3b35ee1ee6947782ab9491}"
+ada_commit="${ADA_COMMIT:-b2c2d7f6b5723a4b924409f9d80ce517d6db8226}"
 dataset_commit="${ADA_DATASET_COMMIT:-9749b92c13e970e70409948fa862461191504ccc}"
 ada_simdutf="${ADA_USE_SIMDUTF:-OFF}"
 benchmark_repetitions="${BENCHMARK_REPETITIONS:-5}"

@@ -2,7 +2,7 @@
 
 These fixtures are copied from
 [`ada-url/ada`](https://github.com/ada-url/ada) at commit
-`30f3f3020c5a979b62f90dc9c37fd45de3cc84d7`.
+`b2c2d7f6b5723a4b924409f9d80ce517d6db8226`.
 
 They are committed so a fresh checkout can reproduce the conformance results
 without network access. `ADA_TEST_ROOT` may point the test harness at another

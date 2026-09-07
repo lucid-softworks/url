@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ada_commit="16a5772360d4b901fc3b35ee1ee6947782ab9491"
+ada_commit="b2c2d7f6b5723a4b924409f9d80ce517d6db8226"
 dataset_commit="9749b92c13e970e70409948fa862461191504ccc"
 ada_root="${repo_root}/target/ada-benchmark"
 ada_build="${ada_root}/build"
