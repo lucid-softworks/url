@@ -127,6 +127,7 @@ fn run_limited_url_cases<T: LimitedUrl>() {
     let original = expansion.href();
     assert!(!expansion.set_pathname(&spaces));
     assert!(!expansion.set_username(&spaces));
+    assert!(!expansion.set_password(&spaces));
     expansion.set_search(&spaces);
     expansion.set_hash(&spaces);
     assert_eq!(expansion.href(), original);

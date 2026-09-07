@@ -17,6 +17,7 @@ mod canonical_absolute;
 mod clean_http;
 mod host_normalization;
 use clean_http::try_can_parse_clean_http;
+mod credential_edit;
 mod special_absolute;
 mod suffix_edit;
 
@@ -1087,14 +1088,6 @@ impl UrlAggregator {
 
     pub fn set_protocol(&mut self, input: &str) -> bool {
         self.mutate("protocol", input)
-    }
-
-    pub fn set_username(&mut self, input: &str) -> bool {
-        self.mutate("username", input)
-    }
-
-    pub fn set_password(&mut self, input: &str) -> bool {
-        self.mutate("password", input)
     }
 
     pub fn set_host(&mut self, input: &str) -> bool {

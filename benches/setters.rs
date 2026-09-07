@@ -50,6 +50,25 @@ macro_rules! run {
             });
             println!("{} {name}: {ns:.2} ns/setter", stringify!($url));
         }
+        for (name, values, password) in [
+            ("ASCII username", ["alice", "longer-user-name"], false),
+            ("Unicode password", ["日本語:@\t", "hello world😀"], true),
+        ] {
+            let mut url =
+                <$url>::parse("https://user:pass@example.com/a/long/path?q=initial#fragment")
+                    .unwrap();
+            let ns = measure(|i| {
+                let value = values[i % values.len()];
+                black_box(if password {
+                    url.set_password(value)
+                } else {
+                    url.set_username(value)
+                });
+                black_box(&url);
+                black_box(url.get_href_size())
+            });
+            println!("{} {name}: {ns:.2} ns/setter", stringify!($url));
+        }
     };
 }
 
