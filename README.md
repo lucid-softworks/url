@@ -150,17 +150,17 @@ Results from `./benchmarks/run.sh` on September 7, 2026, on an Apple M4
 running macOS 26.5, Rust 1.98.0, and Apple Clang 21, with
 `ADA_USE_SIMDUTF=OFF` and `ADA_INCLUDE_URL_PATTERN=ON`, matching Ada defaults.
 Values are mean CPU time per URL over five repetitions.
-[Raw Google Benchmark results](benchmarks/results/ada-b2c2d7f6-credentials.json) are retained
-for reproducibility; the benchmarked Lucid source is commit `6e92ef4`.
+[Raw Google Benchmark results](benchmarks/results/ada-b2c2d7f6-merged.json) are retained
+for reproducibility; the benchmarked Lucid source is commit `fc701e0`.
 
 | Operation | Lucid ns/URL | Ada ns/URL | Lucid speedup |
 | --- | ---: | ---: | ---: |
-| `Url` parse + href | 86.37 | 112.90 | 1.31× |
-| `UrlAggregator` parse + href | 61.71 | 59.21 | 0.96× |
-| `can_parse` | 13.21 | 11.43 | 0.87× |
+| `Url` parse + href | 85.41 | 108.54 | 1.27× |
+| `UrlAggregator` parse + href | 59.70 | 57.26 | 0.96× |
+| `can_parse` | 12.95 | 11.25 | 0.87× |
 
 Both parsers agree on all 100,025 inputs (26 rejected), including agreement
-between `Url`, `UrlAggregator`, and `can_parse`. Ada is about 1.04× faster for aggregator parsing and 1.16× faster for
+between `Url`, `UrlAggregator`, and `can_parse`. Ada is about 1.04× faster for aggregator parsing and 1.15× faster for
 `can_parse` in this run. Both owned href results pass optimization barriers.
 The retained change primarily improves setters; parsing experiments did not
 show a dependable across-the-board gain. See the

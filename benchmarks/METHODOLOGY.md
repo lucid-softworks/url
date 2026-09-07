@@ -72,3 +72,10 @@ URLPattern stays enabled and SIMDUTF stays at its upstream OFF default.
 Earlier setter comparisons remain historical measurements using identical fat
 LTO builds before and after each optimization; the merged default release
 profile follows main and disables LTO on this macOS machine.
+
+The merged source `fc701e0` was remeasured using five repetitions with matched
+no-LTO native builds. Results in `results/ada-b2c2d7f6-merged.json` show
+Lucid/Ada mean ns per URL of 85.41/108.54 (owned parse-plus-href), 59.70/57.26
+(aggregator parse-plus-href), and 12.95/11.25 (validation). All 100,025 inputs
+agree across validity, serialization, and operations. This replaces the earlier
+headline comparison; historical raw measurements remain available.
