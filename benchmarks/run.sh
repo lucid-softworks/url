@@ -38,7 +38,7 @@ cmake \
   -B "${ada_build}" \
   -DCMAKE_BUILD_TYPE=Release \
   -DADA_BENCHMARKS=ON \
-  -DADA_INCLUDE_URL_PATTERN=OFF \
+  -DADA_INCLUDE_URL_PATTERN=ON \
   -DADA_TESTING=OFF \
   -DADA_TOOLS=OFF \
   -DADA_USE_SIMDUTF="${ada_simdutf}"
@@ -49,6 +49,11 @@ cargo build \
   --locked \
   --manifest-path "${benchmark_root}/benchmarks/official_bridge/Cargo.toml" \
   --target-dir "${bridge_target}"
+
+ada_link_args=()
+if [[ "${ada_simdutf}" == "ON" ]]; then
+  ada_link_args+=("${ada_build}/_deps/simdutf-build/src/libsimdutf.a")
+fi
 
 platform_link_args=()
 case "$(uname -s)" in
@@ -70,6 +75,7 @@ esac
   -DNDEBUG \
   -Wno-deprecated-declarations \
   -Wno-deprecated-volatile \
+  -DLUCID_URL_ADA_SIMDUTF="\"${ada_simdutf}\"" \
   -DLUCID_URL_ADA_COMMIT="\"${ada_commit}\"" \
   -DLUCID_URL_DATASET_COMMIT="\"${dataset_commit}\"" \
   -DLUCID_URL_DATASET="\"${dataset_root}/out.txt\"" \
@@ -78,6 +84,7 @@ esac
   "${benchmark_root}/benchmarks/official_compare.cpp" \
   "${bridge_target}/release/liblucid_url_official_benchmark_bridge.a" \
   "${ada_build}/src/libada.a" \
+  "${ada_link_args[@]}" \
   "${ada_build}/_deps/benchmark-build/src/libbenchmark.a" \
   "${platform_link_args[@]}" \
   -o "${runner}"
