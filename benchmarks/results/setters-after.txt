@@ -1,0 +1,9 @@
+   Compiling lucid-url v0.1.0 (/Users/xo/code/lucid-softworks/url)
+    Finished `bench` profile [optimized] target(s) in 2.71s
+     Running benches/setters.rs (target/release/deps/setters-33e3fe82b5020c75)
+UrlAggregator ASCII query: 15.64 ns/setter
+UrlAggregator Unicode query: 100.52 ns/setter
+UrlAggregator fragment: 53.04 ns/setter
+Url ASCII query: 15.33 ns/setter
+Url Unicode query: 101.81 ns/setter
+Url fragment: 51.85 ns/setter

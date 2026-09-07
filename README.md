@@ -136,22 +136,49 @@ which corpus inputs are valid or how any accepted input is serialized.
 
 Results from `./benchmarks/run.sh` on September 7, 2026, on an Apple M4
 running macOS 26.5, Rust 1.98.0, and Apple Clang 21, with
-`ADA_USE_SIMDUTF=OFF`. Values are mean CPU time per URL over five repetitions.
-[Raw Google Benchmark results](benchmarks/results/ada-b2c2d7f6.json) are retained
-for reproducibility; the benchmarked Lucid source is commit `23d349f`.
+`ADA_USE_SIMDUTF=OFF` and `ADA_INCLUDE_URL_PATTERN=ON`, matching Ada defaults.
+Values are mean CPU time per URL over five repetitions.
+[Raw Google Benchmark results](benchmarks/results/ada-b2c2d7f6-verified.json) are retained
+for reproducibility; the benchmarked Lucid source is commit `63d91d5`.
 
 | Operation | Lucid ns/URL | Ada ns/URL | Lucid speedup |
 | --- | ---: | ---: | ---: |
-| `Url` parse + href | 83.06 | 109.49 | 1.32× |
-| `UrlAggregator` parse + href | 58.58 | 58.54 | 1.00× (tie) |
-| `can_parse` | 9.71 | 11.00 | 1.13× |
+| `Url` parse + href | 81.41 | 106.03 | 1.30× |
+| `UrlAggregator` parse + href | 58.33 | 60.49 | 1.04× |
+| `can_parse` | 11.99 | 11.27 | 0.94× |
 
-Both parsers accept, reject, and serialize the same inputs in this 100,025-URL
-run (26 rejected, zero validity or serialization disagreements). The aggregator
-difference is below measurement variability: its coefficient of variation was
-0.52% for Lucid and 1.25% for Ada. The `Url` benchmark forces the owned href
-through an optimization barrier so Rust cannot replace materialization with a
-length lookup.
+Both parsers agree on all 100,025 inputs (26 rejected), including agreement
+between `Url`, `UrlAggregator`, and `can_parse`. Ada is about 1.06× faster for
+`can_parse` in this run. Both owned href results pass optimization barriers.
+The retained change primarily improves setters; parsing experiments did not
+show a dependable across-the-board gain. See the
+[comparison audit](benchmarks/METHODOLOGY.md) for the reviewed anonrig commits,
+feature settings, and validation protocol.
+
+### Setter performance
+
+Query and fragment setters on special hierarchical URLs now encode and replace
+only the affected buffer range. Other URL forms retain the general setter.
+Canonical prefixed input is borrowed after validating every byte; encoded
+replacements still enforce the serialized length limit before changing the URL.
+
+Median nanoseconds per setter over five 200 ms samples on the same Apple M4:
+
+| Representation / workload | Before | After | Speedup |
+| --- | ---: | ---: | ---: |
+| `UrlAggregator`, ASCII query | 2689.64 | 15.64 | 171.97× |
+| `UrlAggregator`, Unicode query | 3231.95 | 100.52 | 32.15× |
+| `UrlAggregator`, fragment | 2849.55 | 53.04 | 53.72× |
+| `Url`, ASCII query | 2674.61 | 15.33 | 174.47× |
+| `Url`, Unicode query | 3204.39 | 101.81 | 31.47× |
+| `Url`, fragment | 2838.15 | 51.85 | 54.74× |
+
+These are Lucid-before/after measurements (`69a58ae` versus `63d91d5`), not
+speedups over Ada. Run `cargo bench --bench setters` to reproduce the workload:
+it alternates two distinct values on a parsed URL and exposes the complete
+mutated URL to an optimization barrier. The same benchmark source and release
+settings were used for both builds. Raw [before](benchmarks/results/setters-before.txt)
+and [after](benchmarks/results/setters-after.txt) output is retained.
 
 ### Historical release artifact size
 

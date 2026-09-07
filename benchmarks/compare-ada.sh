@@ -29,7 +29,7 @@ cmake \
   -B "${ada_build}" \
   -DCMAKE_BUILD_TYPE=Release \
   -DADA_BENCHMARKS=OFF \
-  -DADA_INCLUDE_URL_PATTERN=OFF \
+  -DADA_INCLUDE_URL_PATTERN=ON \
   -DADA_TESTING=OFF \
   -DADA_TOOLS=OFF
 cmake --build "${ada_build}" --config Release --parallel

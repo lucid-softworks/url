@@ -1,0 +1,14 @@
+   Compiling zmij v1.0.23
+   Compiling serde_core v1.0.229
+   Compiling serde_json v1.0.151
+   Compiling itoa v1.0.18
+   Compiling memchr v2.8.3
+   Compiling lucid-url v0.1.0 (/Users/xo/code/lucid-softworks/url/target/setter-baseline-source)
+    Finished `bench` profile [optimized] target(s) in 4.86s
+     Running benches/setters.rs (target/setter-baseline-source/target/release/deps/setters-33e3fe82b5020c75)
+UrlAggregator ASCII query: 2689.64 ns/setter
+UrlAggregator Unicode query: 3231.95 ns/setter
+UrlAggregator fragment: 2849.55 ns/setter
+Url ASCII query: 2674.61 ns/setter
+Url Unicode query: 3204.39 ns/setter
+Url fragment: 2838.15 ns/setter
