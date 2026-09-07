@@ -10,6 +10,9 @@
 use std::fmt;
 use std::sync::atomic::{AtomicU32, Ordering};
 
+mod percent_encoding;
+use percent_encoding::{EncodeSet, push_encoded, push_encoded_runs};
+
 mod encoding;
 mod encoding_tables;
 mod idna;
@@ -1961,113 +1964,6 @@ impl SpecialScheme {
             Self::Ftp => 21,
             Self::File => 0,
         }
-    }
-}
-
-#[derive(Clone, Copy)]
-enum EncodeSet {
-    C0,
-    Fragment,
-    Query,
-    SpecialQuery,
-    Path,
-    UserInfo,
-}
-
-#[inline(always)]
-fn push_encoded(output: &mut String, character: char, set: EncodeSet) {
-    if matches!(character, '\t' | '\n' | '\r') {
-        return;
-    }
-    let encode = match set {
-        EncodeSet::C0 => character <= '\u{1f}' || character > '\u{7e}',
-        EncodeSet::Fragment => {
-            character <= '\u{1f}'
-                || character > '\u{7e}'
-                || matches!(character, ' ' | '"' | '<' | '>' | '`')
-        }
-        EncodeSet::Query => {
-            character <= '\u{1f}'
-                || character > '\u{7e}'
-                || matches!(character, ' ' | '"' | '#' | '<' | '>')
-        }
-        EncodeSet::SpecialQuery => {
-            character <= '\u{1f}'
-                || character > '\u{7e}'
-                || matches!(character, ' ' | '"' | '#' | '<' | '>' | '\'')
-        }
-        EncodeSet::Path => {
-            character <= '\u{1f}'
-                || character > '\u{7e}'
-                || matches!(
-                    character,
-                    ' ' | '"' | '#' | '<' | '>' | '?' | '`' | '{' | '}' | '^'
-                )
-        }
-        EncodeSet::UserInfo => {
-            character <= '\u{1f}'
-                || character > '\u{7e}'
-                || matches!(
-                    character,
-                    ' ' | '"'
-                        | '#'
-                        | '/'
-                        | ':'
-                        | ';'
-                        | '<'
-                        | '='
-                        | '>'
-                        | '?'
-                        | '@'
-                        | '['
-                        | '\\'
-                        | ']'
-                        | '^'
-                        | '`'
-                        | '{'
-                        | '|'
-                        | '}'
-                )
-        }
-    };
-    if !encode {
-        output.push(character);
-        return;
-    }
-
-    const HEX: &[u8; 16] = b"0123456789ABCDEF";
-    let mut utf8 = [0u8; 4];
-    for byte in character.encode_utf8(&mut utf8).bytes() {
-        output.push('%');
-        output.push(char::from(HEX[(byte >> 4) as usize]));
-        output.push(char::from(HEX[(byte & 0x0f) as usize]));
-    }
-}
-
-fn push_encoded_runs(output: &mut String, input: &str, set: EncodeSet, class: u8) {
-    if !input.is_ascii() {
-        for character in input.chars() {
-            push_encoded(output, character, set);
-        }
-        return;
-    }
-
-    let mut run_start = 0usize;
-    for (index, byte) in input.bytes().enumerate() {
-        let skipped = matches!(byte, b'\t' | b'\n' | b'\r');
-        if !skipped && BYTE_CLASSES[byte as usize] & class != 0 {
-            continue;
-        }
-        if run_start < index {
-            output.push_str(&input[run_start..index]);
-        }
-        if !skipped {
-            push_encoded(output, char::from(byte), set);
-        }
-        run_start = index + 1;
-    }
-    if run_start < input.len() {
-        output.push_str(&input[run_start..]);
     }
 }
 
