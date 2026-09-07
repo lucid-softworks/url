@@ -98,7 +98,12 @@ pub(crate) fn try_can_parse_clean_http(input: &str) -> Option<bool> {
         }
     }
     if host_end == authority_start {
-        return Some(false);
+        // Extra authority slashes are consumed by the WHATWG state machine.
+        return if bytes.get(authority_start) == Some(&b'/') {
+            None
+        } else {
+            Some(false)
+        };
     }
     let last = bytes[host_end - 1];
     if last == b'.' {
@@ -243,5 +248,29 @@ impl UrlAggregator {
             search_start,
             hash_start,
         })))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{Url, UrlAggregator, can_parse};
+
+    #[test]
+    fn extra_authority_slashes_agree_across_operations() {
+        for scheme in ["http", "https"] {
+            for count in 2..10 {
+                let input = format!("{scheme}:{}example.com/path?q=1#f", "/".repeat(count));
+                let expected = format!("{scheme}://example.com/path?q=1#f");
+                assert_eq!(Url::parse(&input).unwrap().get_href(), expected);
+                assert_eq!(UrlAggregator::parse(&input).unwrap().get_href(), expected);
+                assert!(can_parse(&input, None), "{input}");
+            }
+            for suffix in ["", "?q=1", "#fragment"] {
+                let input = format!("{scheme}:////{suffix}");
+                assert!(Url::parse(&input).is_err());
+                assert!(UrlAggregator::parse(&input).is_err());
+                assert!(!can_parse(&input, None), "{input}");
+            }
+        }
     }
 }
