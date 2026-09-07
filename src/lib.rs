@@ -18,6 +18,7 @@ mod clean_http;
 mod host_normalization;
 use clean_http::try_can_parse_clean_http;
 mod special_absolute;
+mod suffix_edit;
 
 mod encoding;
 mod encoding_tables;
@@ -1110,14 +1111,6 @@ impl UrlAggregator {
 
     pub fn set_pathname(&mut self, input: &str) -> bool {
         self.mutate("pathname", input)
-    }
-
-    pub fn set_search(&mut self, input: &str) {
-        let _ = self.mutate("search", input);
-    }
-
-    pub fn set_hash(&mut self, input: &str) {
-        let _ = self.mutate("hash", input);
     }
 
     /// Return a JSON diagnostic matching Ada's `to_string()` intent.
