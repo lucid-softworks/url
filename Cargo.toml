@@ -23,6 +23,10 @@ harness = false
 name = "real_world"
 harness = false
 
+[[bench]]
+name = "setters"
+harness = false
+
 [dependencies]
 
 [dev-dependencies]

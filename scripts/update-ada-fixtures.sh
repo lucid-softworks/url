@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ada_revision="${1:-30f3f3020c5a979b62f90dc9c37fd45de3cc84d7}"
+ada_revision="${1:-b2c2d7f6b5723a4b924409f9d80ce517d6db8226}"
 ada_checkout="${repository_root}/target/ada-fixtures"
 fixture_destination="${repository_root}/tests/fixtures/ada"
 

@@ -159,6 +159,14 @@ fn main() {
         run(input, std::slice::from_ref(&input));
         return;
     }
+    run(
+        "Unicode query and fragment",
+        &[
+            "https://example.com/search?q=hello世界&category=books&description=an%20extended%20ASCII%20description#résumé",
+            "https://example.com/?q=日本語の検索と結果&language=ja&source=homepage#検索結果",
+            "https://example.com/?q=😀😃😄😁😆😅😂🤣😊😇&sort=popular#emoji",
+        ],
+    );
     run("canonical ASCII", CANONICAL);
     run("normalization-heavy", NORMALIZATION_HEAVY);
     run("Unicode and IDNA", UNICODE_IDNA);

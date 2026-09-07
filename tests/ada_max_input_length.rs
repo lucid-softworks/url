@@ -127,6 +127,7 @@ fn run_limited_url_cases<T: LimitedUrl>() {
     let original = expansion.href();
     assert!(!expansion.set_pathname(&spaces));
     assert!(!expansion.set_username(&spaces));
+    assert!(!expansion.set_password(&spaces));
     expansion.set_search(&spaces);
     expansion.set_hash(&spaces);
     assert_eq!(expansion.href(), original);
@@ -134,6 +135,13 @@ fn run_limited_url_cases<T: LimitedUrl>() {
     let exceeds_after_normalization = format!("http://x/{}y", " ".repeat(339));
     assert!(T::parse(&exceeds_after_normalization).is_err());
     assert!(!can_parse(&exceeds_after_normalization, None));
+
+    for prefix in ["file://x/?", "http://u@x#"] {
+        let input = format!("{prefix}{}y", " ".repeat(339));
+        assert!(input.len() <= SMALL_LIMIT as usize);
+        assert!(T::parse(&input).is_err());
+        assert!(!can_parse(&input, None));
+    }
 
     let under_after_normalization = format!("http://x/{}y", " ".repeat(337));
     let parsed = T::parse(&under_after_normalization).unwrap();

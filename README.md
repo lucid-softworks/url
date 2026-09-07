@@ -66,7 +66,7 @@ The repository includes Ada's parser fixtures at a pinned test revision. A
 fresh checkout runs them through both `Url` and `UrlAggregator` as part of
 ordinary `cargo test`; missing or malformed fixtures are hard failures.
 
-- URL parsing, serialization, getters, and `can_parse`: 919 cases
+- URL parsing, serialization, getters, and `can_parse`: 921 cases
 - URL setters: 296 cases
 - `IdnaTestV2` through the host parser: 2670 representable cases
 - Ada ToASCII success cases: 68 cases
@@ -105,23 +105,22 @@ revision before reporting results. A missing compiler or failed Ada build is a
 hard failure rather than a Lucid-only fallback.
 
 The comparison fetches Ada's 100,025-URL dataset at commit
-`9749b92c13e970e70409948fa862461191504ccc`. Ada is pinned to commit
-`0a371d6b82c282948597d80f63e856862c8ce667`.
+`9749b92c13e970e70409948fa862461191504ccc`. Ada is pinned to
+`b2c2d7f6b5723a4b924409f9d80ce517d6db8226`, the latest `main` revision
+checked on September 7, 2026. The compatibility fixtures use the same revision.
 
-Both parsers are built with peak local throughput defaults:
-
-- Ada: `Release`, `ADA_USE_SIMDUTF=OFF`, `-O3`, native CPU, amalgamated into
-  the harness TU (not linked as `libada.a`)
-- Lucid: `opt-level=3`, `codegen-units=1`, `target-cpu=native`
-- LTO matched on both sides: off on macOS (Apple Clang linker abort), on for
-  Linux. See the note in `Cargo.toml`.
+Ada's optional simdutf path is off by default, matching Ada's default build.
+It can be measured explicitly with:
 
 ```sh
 ADA_USE_SIMDUTF=ON ./benchmarks/run.sh
-ADA_ENABLE_LTO=OFF ./benchmarks/run.sh
 ```
 
-Override Ada/C++ flags wholesale with `ADA_CXX_FLAGS` (space-separated).
+Both implementations use native CPU optimization. Ada is compiled into the
+benchmark translation unit, and LTO is matched on both sides: off by default
+on macOS and on for Linux. Override with `ADA_ENABLE_LTO`; `ADA_CXX_FLAGS`
+sets the C++ flags. These build settings preserve main's benchmark fairness
+changes while retaining Ada's default SIMDUTF and URLPattern settings.
 
 For Lucid-only development regressions, without making a comparison claim:
 
@@ -131,11 +130,13 @@ cargo bench --bench parse
 
 These microbenchmarks exercise focused canonical, normalization, Unicode,
 IDNA, and long-input paths. They are regression aids rather than published
-Ada comparisons. Each section prints the dataset it runs (`# source`,
-`# urls=… bytes=…`, and the URL list). Cap listing with
-`LUCID_URL_BENCH_DATASET_PRINT=N`. The large real-world corpus is Ada's
-[`url-dataset`](https://github.com/ada-url/url-dataset) `out.txt`; mixed top
-sites match Ada's default `url_examples_default` from `benchmarks/bench.cpp`.
+Ada comparisons.
+
+Development benchmarks print their datasets; limit listing with
+`LUCID_URL_BENCH_DATASET_PRINT=N`. Mixed top sites measure parse-plus-href,
+clean HTTP inputs exercise validation, and the 100,025-URL corpus supplies
+published comparisons. Small mixed corpora do not establish general validation
+speedups. Both implementations keep parsed results and href values observable.
 
 ### Official Ada benchmark protocol
 
@@ -145,50 +146,72 @@ the official parse-plus-href and `can_parse` operations and reports the mean
 of five repetitions. It also refuses to run if the parsers disagree about
 which corpus inputs are valid or how any accepted input is serialized.
 
-Results from the improved `./benchmarks/compare-ada.sh` harness on an Apple M5 Max
-running macOS 26.5 (matched no-LTO builds, Ada amalgamated into the harness,
-`ADA_USE_SIMDUTF=OFF`, Ada `0a371d6b82c282948597d80f63e856862c8ce667`). Prefer
-`./benchmarks/run.sh` for the single-process Google Benchmark protocol.
+Results from `./benchmarks/run.sh` on September 7, 2026, on an Apple M4
+running macOS 26.5, Rust 1.98.0, and Apple Clang 21, with
+`ADA_USE_SIMDUTF=OFF` and `ADA_INCLUDE_URL_PATTERN=ON`, matching Ada defaults.
+Values are mean CPU time per URL over five repetitions.
+[Raw Google Benchmark results](benchmarks/results/ada-b2c2d7f6-merged.json) are retained
+for reproducibility; the benchmarked Lucid source is commit `fc701e0`.
 
-#### Microbenchmarks
+| Operation | Lucid ns/URL | Ada ns/URL | Lucid speedup |
+| --- | ---: | ---: | ---: |
+| `Url` parse + href | 85.41 | 108.54 | 1.27× |
+| `UrlAggregator` parse + href | 59.70 | 57.26 | 0.96× |
+| `can_parse` | 12.95 | 11.25 | 0.87× |
 
-| Workload | Lucid `UrlAggregator` | Lucid `Url` | Ada `url_aggregator` | Ada `url` |
-| --- | ---: | ---: | ---: | ---: |
-| Canonical ASCII | 48.50 | 66.94 | 70.26 | 86.91 |
-| Normalization-heavy | 92.70 | 110.06 | 156.03 | 147.73 |
-| Unicode and IDNA | 730.70 | 751.74 | 397.01 | 407.75 |
-| Long canonical scans | 54.36 | 73.57 | 66.63 | 95.14 |
+Both parsers agree on all 100,025 inputs (26 rejected), including agreement
+between `Url`, `UrlAggregator`, and `can_parse`. Ada is about 1.04× faster for aggregator parsing and 1.15× faster for
+`can_parse` in this run. Both owned href results pass optimization barriers.
+The retained change primarily improves setters; parsing experiments did not
+show a dependable across-the-board gain. See the
+[comparison audit](benchmarks/METHODOLOGY.md) for the reviewed anonrig commits,
+feature settings, and validation protocol.
 
-Values are ns/URL. Microbenchmark numbers above are from the previous full run;
-re-run `./benchmarks/compare-ada.sh` after harness changes if you need a matched
-micro set.
+### Setter performance
 
-#### Real-world corpora
+Query and fragment setters on special hierarchical URLs now encode and replace
+only the affected buffer range. Other URL forms retain the general setter.
+Canonical prefixed input is borrowed after validating every byte; encoded
+replacements still enforce the serialized length limit before changing the URL.
 
-| Corpus | Operation | Lucid ns/URL | Ada ns/URL | Lucid speedup |
-| --- | --- | ---: | ---: | ---: |
-| Clean HTTP (24) | `can_parse` | 6.64 | 10.15 | 1.53× |
-| Benchdata (100,025) | `UrlAggregator` | 52.04 | 51.98 | 1.00× |
-| Benchdata (100,025) | `Url` | 113.29 | 79.21 | 0.70× |
-| Benchdata (100,025) | `can_parse` | 10.35 | 12.33 | 1.19× |
+Median nanoseconds per setter over five 200 ms samples on the same Apple M4:
 
-Corpora are split on purpose:
+| Representation / workload | Before | After | Speedup |
+| --- | ---: | ---: | ---: |
+| `UrlAggregator`, ASCII query | 2689.64 | 15.64 | 171.97× |
+| `UrlAggregator`, Unicode query | 3231.95 | 100.52 | 32.15× |
+| `UrlAggregator`, fragment | 2849.55 | 53.04 | 53.72× |
+| `Url`, ASCII query | 2674.61 | 15.33 | 174.47× |
+| `Url`, Unicode query | 3204.39 | 101.81 | 31.47× |
+| `Url`, fragment | 2838.15 | 51.85 | 54.74× |
 
-- **Mixed top sites** measure parse+href only (not shown above; the 11-URL set
-  is too small for stable headline numbers and includes IPv4/IPv6/non-special
-  paths). They remain in the harness for local smoke checks.
-- **Clean HTTP** measures `can_parse` on already-canonical special URLs that
-  both fast paths target. A mean over mixed top sites previously overstated the
-  `can_parse` gap because three slow-path URLs dominated eleven samples.
-- **Benchdata** is the large 100k corpus for published parse and `can_parse`
-  claims.
+These are Lucid-before/after measurements (`69a58ae` versus `63d91d5`), not
+speedups over Ada. Run `cargo bench --bench setters` to reproduce the workload:
+it alternates two distinct values on a parsed URL and exposes the complete
+mutated URL to an optimization barrier. The same benchmark source and release
+settings (including fat LTO, before main’s profile change) were used for both builds. Raw [before](benchmarks/results/setters-before.txt)
+and [after](benchmarks/results/setters-after.txt) output is retained.
 
-The `Url` path materializes an owned href (matching Ada's `get_href()` protocol)
-so the compiler cannot replace it with a length lookup. Ada micro/real-world
-harnesses materialize inputs on the heap and opaque the pointer/length so the
-amalgamated TU cannot constant-fold known string literals.
+Credential setters also avoid reparsing special URLs, following Ada's recent
+credential-tail optimization (#1228). The same benchmark method, against
+Lucid `970dedc`, with fat LTO on both Lucid builds, measured:
 
-### Release artifact size
+| Operation | Before (ns) | After (ns) | Speedup |
+| --- | ---: | ---: | ---: |
+| UrlAggregator ASCII username | 2552.44 | 79.60 | 32.07× |
+| UrlAggregator Unicode password | 3741.38 | 111.49 | 33.56× |
+| Url ASCII username | 2518.98 | 84.07 | 29.96× |
+| Url Unicode password | 3913.83 | 121.53 | 32.20× |
+
+These are Lucid before/after gains. Encoding, length-limit checks, and component
+offsets remain covered by the tests. Raw [before](benchmarks/results/credentials-before.txt)
+and [after](benchmarks/results/credentials-after.txt) measurements are retained.
+
+### Historical release artifact size
+
+These size measurements predate the September 2026 refresh and use Ada
+`16a5772360d4b901fc3b35ee1ee6947782ab9491`; they have not been rerun
+against the current pin.
 
 For a native-code comparison, both libraries were built at optimization level
 3 without LTO so the Apple Mach-O `size` tool could inspect their complete

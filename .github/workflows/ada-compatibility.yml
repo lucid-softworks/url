@@ -21,7 +21,7 @@ jobs:
       - name: Run Ada fixture suite
         env:
           ADA_TEST_ROOT: ${{ github.workspace }}/target/ada-latest/tests/wpt
-        run: cargo test --test ada_conformance --locked
+        run: cargo test --test ada_conformance --test ada_parser_regressions --test ada_max_input_length --locked
       - name: Detect upstream parser-test changes
         run: |
           pinned_revision="$(cat tests/fixtures/ada/REVISION)"

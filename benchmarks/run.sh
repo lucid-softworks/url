@@ -2,7 +2,7 @@
 set -euo pipefail
 
 benchmark_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ada_commit="${ADA_COMMIT:-0a371d6b82c282948597d80f63e856862c8ce667}"
+ada_commit="${ADA_COMMIT:-b2c2d7f6b5723a4b924409f9d80ce517d6db8226}"
 dataset_commit="${ADA_DATASET_COMMIT:-9749b92c13e970e70409948fa862461191504ccc}"
 ada_simdutf="${ADA_USE_SIMDUTF:-OFF}"
 benchmark_repetitions="${BENCHMARK_REPETITIONS:-5}"
@@ -134,7 +134,7 @@ cmake \
   -DCMAKE_SHARED_LINKER_FLAGS="${cmake_linker_flags}" \
   -DCMAKE_MODULE_LINKER_FLAGS="${cmake_linker_flags}" \
   -DADA_BENCHMARKS=ON \
-  -DADA_INCLUDE_URL_PATTERN=OFF \
+  -DADA_INCLUDE_URL_PATTERN=ON \
   -DADA_TESTING=OFF \
   -DADA_TOOLS=OFF \
   -DADA_USE_SIMDUTF="${ada_simdutf}"
@@ -167,7 +167,7 @@ extra_libs=()
 ada_defines=(
   -DLUCID_URL_AMALGAMATE_ADA
   -DLUCID_URL_ADA_AMALGAMATION="\"${ada_root}/src/ada.cpp\""
-  -DADA_INCLUDE_URL_PATTERN=0
+  -DADA_INCLUDE_URL_PATTERN=1
 )
 if [[ "${ada_simdutf}" == "ON" ]]; then
   ada_defines+=(-DADA_USE_SIMDUTF)
@@ -198,6 +198,7 @@ fi
   -Wno-unused-parameter \
   -Wno-sign-conversion \
   ${ada_defines[@]+"${ada_defines[@]}"} \
+  -DLUCID_URL_ADA_SIMDUTF="\"${ada_simdutf}\"" \
   -DLUCID_URL_ADA_COMMIT="\"${ada_commit}\"" \
   -DLUCID_URL_DATASET_COMMIT="\"${dataset_commit}\"" \
   -DLUCID_URL_DATASET="\"${dataset_root}/out.txt\"" \

@@ -132,3 +132,21 @@ pub unsafe extern "C" fn lucid_bench_write_href(
     }
     href.len()
 }
+
+/// Compare all public parse operations outside the timed benchmark loop.
+#[unsafe(no_mangle)]
+pub extern "C" fn lucid_bench_operations_agree(index: usize) -> bool {
+    let Some(input) = urls().get(index) else {
+        return false;
+    };
+    let aggregate = UrlAggregator::parse(input);
+    let url = Url::parse(input);
+    if aggregate.is_ok() != url.is_ok() || aggregate.is_ok() != can_parse(input, None) {
+        return false;
+    }
+    match (aggregate, url) {
+        (Ok(aggregate), Ok(url)) => aggregate.get_href() == url.get_href(),
+        (Err(_), Err(_)) => true,
+        _ => false,
+    }
+}
