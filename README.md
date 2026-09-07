@@ -138,17 +138,17 @@ Results from `./benchmarks/run.sh` on September 7, 2026, on an Apple M4
 running macOS 26.5, Rust 1.98.0, and Apple Clang 21, with
 `ADA_USE_SIMDUTF=OFF` and `ADA_INCLUDE_URL_PATTERN=ON`, matching Ada defaults.
 Values are mean CPU time per URL over five repetitions.
-[Raw Google Benchmark results](benchmarks/results/ada-b2c2d7f6-verified.json) are retained
-for reproducibility; the benchmarked Lucid source is commit `63d91d5`.
+[Raw Google Benchmark results](benchmarks/results/ada-b2c2d7f6-credentials.json) are retained
+for reproducibility; the benchmarked Lucid source is commit `6e92ef4`.
 
 | Operation | Lucid ns/URL | Ada ns/URL | Lucid speedup |
 | --- | ---: | ---: | ---: |
-| `Url` parse + href | 81.41 | 106.03 | 1.30× |
-| `UrlAggregator` parse + href | 58.33 | 60.49 | 1.04× |
-| `can_parse` | 11.99 | 11.27 | 0.94× |
+| `Url` parse + href | 86.37 | 112.90 | 1.31× |
+| `UrlAggregator` parse + href | 61.71 | 59.21 | 0.96× |
+| `can_parse` | 13.21 | 11.43 | 0.87× |
 
 Both parsers agree on all 100,025 inputs (26 rejected), including agreement
-between `Url`, `UrlAggregator`, and `can_parse`. Ada is about 1.06× faster for
+between `Url`, `UrlAggregator`, and `can_parse`. Ada is about 1.04× faster for aggregator parsing and 1.16× faster for
 `can_parse` in this run. Both owned href results pass optimization barriers.
 The retained change primarily improves setters; parsing experiments did not
 show a dependable across-the-board gain. See the
@@ -179,6 +179,21 @@ it alternates two distinct values on a parsed URL and exposes the complete
 mutated URL to an optimization barrier. The same benchmark source and release
 settings were used for both builds. Raw [before](benchmarks/results/setters-before.txt)
 and [after](benchmarks/results/setters-after.txt) output is retained.
+
+Credential setters also avoid reparsing special URLs, following Ada's recent
+credential-tail optimization (#1228). The same benchmark method, against
+Lucid `970dedc`, measured:
+
+| Operation | Before (ns) | After (ns) | Speedup |
+| --- | ---: | ---: | ---: |
+| UrlAggregator ASCII username | 2552.44 | 79.60 | 32.07× |
+| UrlAggregator Unicode password | 3741.38 | 111.49 | 33.56× |
+| Url ASCII username | 2518.98 | 84.07 | 29.96× |
+| Url Unicode password | 3913.83 | 121.53 | 32.20× |
+
+These are Lucid before/after gains. Encoding, length-limit checks, and component
+offsets remain covered by the tests. Raw [before](benchmarks/results/credentials-before.txt)
+and [after](benchmarks/results/credentials-after.txt) measurements are retained.
 
 ### Historical release artifact size
 
