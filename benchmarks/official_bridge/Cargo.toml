@@ -12,7 +12,8 @@ lucid-url = { path = "../.." }
 
 [profile.release]
 opt-level = 3
-lto = "fat"
+# Off so Lucid matches Ada (see root Cargo.toml).
+# lto = "fat"
 codegen-units = 1
 panic = "abort"
 strip = "symbols"

@@ -116,6 +116,12 @@ It can be measured explicitly with:
 ADA_USE_SIMDUTF=ON ./benchmarks/run.sh
 ```
 
+Both implementations use native CPU optimization. Ada is compiled into the
+benchmark translation unit, and LTO is matched on both sides: off by default
+on macOS and on for Linux. Override with `ADA_ENABLE_LTO`; `ADA_CXX_FLAGS`
+sets the C++ flags. These build settings preserve main's benchmark fairness
+changes while retaining Ada's default SIMDUTF and URLPattern settings.
+
 For Lucid-only development regressions, without making a comparison claim:
 
 ```sh
@@ -125,6 +131,12 @@ cargo bench --bench parse
 These microbenchmarks exercise focused canonical, normalization, Unicode,
 IDNA, and long-input paths. They are regression aids rather than published
 Ada comparisons.
+
+Development benchmarks print their datasets; limit listing with
+`LUCID_URL_BENCH_DATASET_PRINT=N`. Mixed top sites measure parse-plus-href,
+clean HTTP inputs exercise validation, and the 100,025-URL corpus supplies
+published comparisons. Small mixed corpora do not establish general validation
+speedups. Both implementations keep parsed results and href values observable.
 
 ### Official Ada benchmark protocol
 
@@ -177,12 +189,12 @@ These are Lucid-before/after measurements (`69a58ae` versus `63d91d5`), not
 speedups over Ada. Run `cargo bench --bench setters` to reproduce the workload:
 it alternates two distinct values on a parsed URL and exposes the complete
 mutated URL to an optimization barrier. The same benchmark source and release
-settings were used for both builds. Raw [before](benchmarks/results/setters-before.txt)
+settings (including fat LTO, before main’s profile change) were used for both builds. Raw [before](benchmarks/results/setters-before.txt)
 and [after](benchmarks/results/setters-after.txt) output is retained.
 
 Credential setters also avoid reparsing special URLs, following Ada's recent
 credential-tail optimization (#1228). The same benchmark method, against
-Lucid `970dedc`, measured:
+Lucid `970dedc`, with fat LTO on both Lucid builds, measured:
 
 | Operation | Before (ns) | After (ns) | Speedup |
 | --- | ---: | ---: | ---: |

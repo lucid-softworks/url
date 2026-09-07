@@ -22,6 +22,10 @@
 #error "LUCID_URL_DATASET_COMMIT must identify the dataset revision"
 #endif
 
+#if defined(LUCID_URL_AMALGAMATE_ADA)
+#include LUCID_URL_ADA_AMALGAMATION
+#endif
+
 extern "C" {
 std::size_t lucid_bench_initialize(const unsigned char *path,
                                    std::size_t length);
@@ -81,13 +85,12 @@ template <class Result> void ada_parse_and_href(benchmark::State &state) {
   volatile std::size_t href_size = 0;
   for (auto _ : state) {
     for (std::string &input : url_examples) {
-      auto url = ada::parse<Result>(input);
+      ada::result<Result> url = ada::parse<Result>(input);
+      benchmark::DoNotOptimize(url);
       if (url) {
-        success++;
         auto href = url->get_href();
-        if constexpr (std::is_same_v<Result, ada::url>) {
-          benchmark::DoNotOptimize(href);
-        }
+        benchmark::DoNotOptimize(href);
+        success++;
         href_size += href.size();
       }
     }
@@ -197,6 +200,29 @@ int main(int argc, char **argv) {
   }
   const auto lucid_invalid = lucid_bench_count_invalid();
 
+  // Dataset report, inspired by ada-url/ada (Loading path + recovered counts).
+  std::cout << "# Loading " << dataset << '\n';
+  std::cout << "# dataset commit: " << LUCID_URL_DATASET_COMMIT << '\n';
+  std::cout << "# Ada commit: " << LUCID_URL_ADA_COMMIT << '\n';
+  std::cout << "# urls=" << url_examples.size()
+            << " bytes=" << static_cast<std::size_t>(url_examples_bytes)
+            << '\n';
+  std::cout << "# invalid urls: Ada=" << ada_invalid
+            << " Lucid=" << lucid_invalid << '\n';
+  constexpr std::size_t sample_limit = 8;
+  for (std::size_t index = 0;
+       index < url_examples.size() && index < sample_limit; ++index) {
+    std::cout << "#   [" << index << "] " << url_examples[index] << '\n';
+  }
+  if (url_examples.size() > sample_limit) {
+    std::cout << "#   ... " << (url_examples.size() - sample_limit)
+              << " more\n";
+  }
+
+  benchmark::AddCustomContext("dataset path", std::string(dataset));
+  if (!url_examples.empty()) {
+    benchmark::AddCustomContext("dataset sample[0]", url_examples.front());
+  }
   benchmark::AddCustomContext("ADA_USE_SIMDUTF", LUCID_URL_ADA_SIMDUTF);
   benchmark::AddCustomContext("Ada commit", LUCID_URL_ADA_COMMIT);
   benchmark::AddCustomContext("dataset commit", LUCID_URL_DATASET_COMMIT);

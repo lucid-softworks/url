@@ -12,8 +12,8 @@ The reviewed anonrig (Yagiz Nizipli) changes include:
 Ada's `CMakeLists.txt` defaults `ADA_USE_SIMDUTF` to **OFF**. This optional
 Unicode/IDNA dependency is separate from the URL parser's built-in SIMD
 scanners. The comparison preserves that default and enables URLPattern,
-matching its upstream default too. Ada retains its normal Release compiler
-settings and architecture dispatch. On this machine its native NEON paths are
+matching its upstream default too. The merged harness preserves main’s native CPU compilation, Ada amalgamation,
+and matched LTO policy (off on macOS, on for Linux). On this machine its native NEON paths are
 available. `ADA_USE_SIMDUTF=ON` remains supported, including linking simdutf;
 the selected setting is recorded in the benchmark JSON.
 
@@ -62,3 +62,13 @@ for owned parse-plus-href, 61.71/59.21 for aggregator parse-plus-href, and
 13.21/11.43 for validation. This run recorded substantial background system
 load (19.41 one-minute load average); small differences between runs should
 not be attributed to the credential change. No parsing speedup is claimed.
+
+## Merge with main
+
+The merge retains main's benchmark result barriers, dataset reporting, native
+CPU flags, Ada amalgamation, and matching LTO settings. It also retains this
+branch's current Ada fixtures, parser fixes, and cross-operation preflight.
+URLPattern stays enabled and SIMDUTF stays at its upstream OFF default.
+Earlier setter comparisons remain historical measurements using identical fat
+LTO builds before and after each optimization; the merged default release
+profile follows main and disables LTO on this macOS machine.
